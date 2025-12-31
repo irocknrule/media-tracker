@@ -53,12 +53,39 @@ pip install -r requirements.txt
 python -m backend.database
 ```
 
-3. Run the backend (FastAPI):
+3. Set up API keys (optional but recommended):
+   
+   **OMDB API Key** (REQUIRED for movie search):
+   - Get a free API key from: http://www.omdbapi.com/apikey.aspx
+   - Set it as an environment variable before running the backend:
+     ```bash
+     # On macOS/Linux:
+     export OMDB_API_KEY="your_api_key_here"
+     
+     # On Windows (PowerShell):
+     $env:OMDB_API_KEY="your_api_key_here"
+     
+     # On Windows (Command Prompt):
+     set OMDB_API_KEY=your_api_key_here
+     ```
+   - **Note**: Without this key, movie search will return empty results.
+   
+   **Last.fm API Key** (OPTIONAL - for better music search):
+   - Get a free API key from: https://www.last.fm/api/account/create
+   - Set it as an environment variable:
+     ```bash
+     export LASTFM_API_KEY="your_api_key_here"
+     ```
+   - If not set, a default demo key will be used (may have rate limits).
+   
+   **Note**: TV Shows and Books search work without API keys (they use free APIs: TVMaze and Open Library).
+
+4. Run the backend (FastAPI):
 ```bash
 uvicorn backend.main:app --reload
 ```
 
-4. Run the frontend (Streamlit):
+5. Run the frontend (Streamlit):
 ```bash
 streamlit run frontend/app.py
 ```

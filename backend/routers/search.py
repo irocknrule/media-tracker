@@ -289,50 +289,50 @@ def search_music(
     query: str,
     current_user: User = Depends(get_current_user)
 ):
-    """Search for music using Last.fm API (free, API key recommended but not required for basic search)"""
+    """Search for music albums using Last.fm API (free, API key recommended but not required for basic search)"""
     try:
         # Last.fm API (free, 5 requests/second)
         api_key = os.getenv("LASTFM_API_KEY", "b25b959554ed76058ac220b7b2e0a026")  # Public demo key
         encoded_query = quote(query)
-        url = f"http://ws.audioscrobbler.com/2.0/?method=track.search&track={encoded_query}&api_key={api_key}&format=json&limit=5"
+        # Search for albums instead of tracks, limit to 20 results
+        url = f"http://ws.audioscrobbler.com/2.0/?method=album.search&album={encoded_query}&api_key={api_key}&format=json&limit=20"
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
         
         results = []
-        tracks = data.get("results", {}).get("trackmatches", {}).get("track", [])
+        albums = data.get("results", {}).get("albummatches", {}).get("album", [])
         
-        if not isinstance(tracks, list):
-            tracks = [tracks] if tracks else []
+        # Handle case where API returns a single album object instead of a list
+        if not isinstance(albums, list):
+            albums = [albums] if albums else []
         
-        for item in tracks[:5]:
-            # Get album art
+        for item in albums:
+            # Get album info directly from search results
+            album_name = item.get("name", "")
             artist = item.get("artist", "")
-            track = item.get("name", "")
             
-            # Try to get album art from Last.fm (simplified - skip if too slow)
+            # Get album art from the search result images
             thumbnail = ""
-            try:
-                encoded_artist = quote(artist)
-                encoded_track = quote(track)
-                album_url = f"http://ws.audioscrobbler.com/2.0/?method=track.getInfo&api_key={api_key}&artist={encoded_artist}&track={encoded_track}&format=json"
-                album_response = requests.get(album_url, timeout=5)
-                if album_response.status_code == 200:
-                    album_data = album_response.json()
-                    album_images = album_data.get("track", {}).get("album", {}).get("image", [])
-                    if album_images:
-                        # Get medium size image
-                        for img in album_images:
-                            if img.get("@size") == "medium":
-                                thumbnail = img.get("#text", "")
-                                break
-                        if not thumbnail and album_images:
-                            thumbnail = album_images[0].get("#text", "")
-            except:
-                pass  # Skip thumbnail if it fails
+            images = item.get("image", [])
+            if images:
+                # Get medium size image (or large if medium not available)
+                for img in images:
+                    if isinstance(img, dict):
+                        size = img.get("@size", "")
+                        if size == "medium":
+                            thumbnail = img.get("#text", "")
+                            break
+                        elif size == "large" and not thumbnail:
+                            thumbnail = img.get("#text", "")
+                # Fallback to first image if no medium/large found
+                if not thumbnail and images:
+                    first_img = images[0]
+                    if isinstance(first_img, dict):
+                        thumbnail = first_img.get("#text", "")
             
             results.append({
-                "title": track,
+                "title": album_name,
                 "artist": artist,
                 "thumbnail": thumbnail,
                 "description": "",
