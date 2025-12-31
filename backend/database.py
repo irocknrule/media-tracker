@@ -70,27 +70,30 @@ def get_db():
 
 
 def migrate_add_thumbnail_url():
-    """Migration: Add thumbnail_url column to tv_shows table"""
+    """Migration: Add thumbnail_url column to tv_shows, movies, books, and music tables"""
     db = SessionLocal()
     try:
-        # Check if column already exists
-        if "sqlite" in SQLALCHEMY_DATABASE_URL:
-            # SQLite doesn't support IF NOT EXISTS for ALTER TABLE ADD COLUMN
-            # So we'll try to add it and catch the error if it exists
-            try:
-                db.execute(text("ALTER TABLE tv_shows ADD COLUMN thumbnail_url VARCHAR"))
+        tables = ["tv_shows", "movies", "books", "music"]
+        
+        for table in tables:
+            if "sqlite" in SQLALCHEMY_DATABASE_URL:
+                # SQLite doesn't support IF NOT EXISTS for ALTER TABLE ADD COLUMN
+                # So we'll try to add it and catch the error if it exists
+                try:
+                    db.execute(text(f"ALTER TABLE {table} ADD COLUMN thumbnail_url VARCHAR"))
+                    db.commit()
+                    print(f"Successfully added thumbnail_url column to {table} table")
+                except Exception as e:
+                    if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
+                        print(f"Column thumbnail_url already exists in {table}, skipping migration")
+                        db.rollback()
+                    else:
+                        raise
+            else:
+                # For other databases (PostgreSQL, MySQL, etc.)
+                db.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS thumbnail_url VARCHAR"))
                 db.commit()
-                print("Successfully added thumbnail_url column to tv_shows table")
-            except Exception as e:
-                if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
-                    print("Column thumbnail_url already exists, skipping migration")
-                else:
-                    raise
-        else:
-            # For other databases (PostgreSQL, MySQL, etc.)
-            db.execute(text("ALTER TABLE tv_shows ADD COLUMN IF NOT EXISTS thumbnail_url VARCHAR"))
-            db.commit()
-            print("Successfully added thumbnail_url column to tv_shows table")
+                print(f"Successfully added thumbnail_url column to {table} table")
     except Exception as e:
         print(f"Error during migration: {e}")
         import traceback

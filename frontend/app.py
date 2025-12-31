@@ -310,7 +310,7 @@ def main_app():
         st.markdown("### Navigation")
         page = st.radio(
             "Go to",
-            ["Movies", "TV Shows", "Books", "Music", "Analytics"],
+            ["Movies", "TV Shows", "Books", "Music", "Manual Entry", "Analytics"],
             label_visibility="collapsed"
         )
     
@@ -323,6 +323,8 @@ def main_app():
         books_page()
     elif page == "Music":
         music_page()
+    elif page == "Manual Entry":
+        manual_entry_page()
     elif page == "Analytics":
         analytics_page()
 
@@ -336,7 +338,7 @@ def movies_page():
     
     with tab1:
         st.subheader("Your Movies")
-        year_filter = st.selectbox("Filter by Year", ["All"] + list(range(2020, date.today().year + 2)))
+        year_filter = st.selectbox("Filter by Year", ["All"] + list(range(2020, date.today().year + 2)), key="movie_year")
         
         try:
             params = {}
@@ -348,13 +350,80 @@ def movies_page():
                 movies = response.json()
                 
                 if movies:
+                    # Display movies in grid layout
+                    st.markdown("### Your Movies")
+                    cols_per_row = 4
+                    
+                    for i in range(0, len(movies), cols_per_row):
+                        cols = st.columns(cols_per_row)
+                        for j, movie in enumerate(movies[i:i+cols_per_row]):
+                            with cols[j]:
+                                thumbnail_url = movie.get("thumbnail_url")
+                                
+                                # Display thumbnail
+                                image_displayed = False
+                                if thumbnail_url and thumbnail_url.strip() and thumbnail_url != "N/A":
+                                    if thumbnail_url.startswith("http://") or thumbnail_url.startswith("https://"):
+                                        try:
+                                            st.markdown(
+                                                f'<img src="{thumbnail_url}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
+                                                unsafe_allow_html=True
+                                            )
+                                            image_displayed = True
+                                        except:
+                                            pass
+                                        
+                                        if not image_displayed:
+                                            try:
+                                                st.image(thumbnail_url, use_container_width=True)
+                                                image_displayed = True
+                                            except:
+                                                pass
+                                    elif thumbnail_url.startswith("data:"):
+                                        # Handle base64 data URLs
+                                        try:
+                                            st.markdown(
+                                                f'<img src="{thumbnail_url}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
+                                                unsafe_allow_html=True
+                                            )
+                                            image_displayed = True
+                                        except:
+                                            pass
+                                
+                                if not image_displayed:
+                                    st.markdown(
+                                        f'<div style="width:100%;height:250px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:48px;margin-bottom:10px;">🎬</div>', 
+                                        unsafe_allow_html=True
+                                    )
+                                
+                                # Show title
+                                st.write(f"**{movie['title']}**")
+                                
+                                # Show year
+                                if movie.get('year'):
+                                    st.caption(f"Year: {movie['year']}")
+                                
+                                # Show watched date
+                                st.caption(f"Watched: {movie['watched_date']}")
+                                
+                                # Show rating
+                                rating = movie.get('rating')
+                                if rating:
+                                    st.caption(f"Rating: {rating}/10")
+                    
+                    # Details section below
+                    st.markdown("---")
+                    st.markdown("### Movie Details")
+                    
                     for movie in movies:
-                        with st.expander(f"**{movie['title']}** ({movie.get('year', 'N/A')}) - {movie['watched_date']}"):
-                            col1, col2, col3 = st.columns(3)
+                        year_str = f" ({movie.get('year')})" if movie.get('year') else ""
+                        with st.expander(f"**{movie['title']}**{year_str} - {movie['watched_date']}"):
+                            col1, col2, col3 = st.columns([2, 2, 1])
                             with col1:
-                                st.write(f"**Rating:** {movie.get('rating', 'N/A')}/10" if movie.get('rating') else "**Rating:** N/A")
-                            with col2:
                                 st.write(f"**Watched:** {movie['watched_date']}")
+                            with col2:
+                                rating = movie.get('rating')
+                                st.write(f"**Rating:** {rating}/10" if rating else "**Rating:** N/A")
                             with col3:
                                 if st.button("Delete", key=f"delete_movie_{movie['id']}"):
                                     delete_response = make_authenticated_request("DELETE", f"/movies/{movie['id']}")
@@ -509,7 +578,7 @@ def tv_shows_page():
                                     if thumbnail_url.startswith("http://") or thumbnail_url.startswith("https://"):
                                         try:
                                             st.markdown(
-                                                f'<img src="{thumbnail_url}" width="100%" style="border-radius: 8px; object-fit: cover; height: 250px; display: block; margin-bottom: 10px;">', 
+                                                f'<img src="{thumbnail_url}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
                                                 unsafe_allow_html=True
                                             )
                                             image_displayed = True
@@ -522,6 +591,16 @@ def tv_shows_page():
                                                 image_displayed = True
                                             except:
                                                 pass
+                                    elif thumbnail_url.startswith("data:"):
+                                        # Handle base64 data URLs
+                                        try:
+                                            st.markdown(
+                                                f'<img src="{thumbnail_url}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
+                                                unsafe_allow_html=True
+                                            )
+                                            image_displayed = True
+                                        except:
+                                            pass
                                 
                                 if not image_displayed:
                                     st.markdown(
@@ -826,14 +905,80 @@ def books_page():
                 books = response.json()
                 
                 if books:
+                    # Display books in grid layout
+                    st.markdown("### Your Books")
+                    cols_per_row = 4
+                    
+                    for i in range(0, len(books), cols_per_row):
+                        cols = st.columns(cols_per_row)
+                        for j, book in enumerate(books[i:i+cols_per_row]):
+                            with cols[j]:
+                                thumbnail_url = book.get("thumbnail_url")
+                                
+                                # Display thumbnail
+                                image_displayed = False
+                                if thumbnail_url and thumbnail_url.strip() and thumbnail_url != "N/A":
+                                    if thumbnail_url.startswith("http://") or thumbnail_url.startswith("https://"):
+                                        try:
+                                            st.markdown(
+                                                f'<img src="{thumbnail_url}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
+                                                unsafe_allow_html=True
+                                            )
+                                            image_displayed = True
+                                        except:
+                                            pass
+                                        
+                                        if not image_displayed:
+                                            try:
+                                                st.image(thumbnail_url, use_container_width=True)
+                                                image_displayed = True
+                                            except:
+                                                pass
+                                    elif thumbnail_url.startswith("data:"):
+                                        # Handle base64 data URLs
+                                        try:
+                                            st.markdown(
+                                                f'<img src="{thumbnail_url}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
+                                                unsafe_allow_html=True
+                                            )
+                                            image_displayed = True
+                                        except:
+                                            pass
+                                
+                                if not image_displayed:
+                                    st.markdown(
+                                        f'<div style="width:100%;height:250px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:48px;margin-bottom:10px;">📖</div>', 
+                                        unsafe_allow_html=True
+                                    )
+                                
+                                # Show title
+                                st.write(f"**{book['title']}**")
+                                
+                                # Show author
+                                if book.get('author'):
+                                    st.caption(f"by {book['author']}")
+                                
+                                # Show finished date
+                                st.caption(f"Finished: {book['finished_date']}")
+                                
+                                # Show rating
+                                rating = book.get('rating')
+                                if rating:
+                                    st.caption(f"Rating: {rating}/10")
+                    
+                    # Details section below
+                    st.markdown("---")
+                    st.markdown("### Book Details")
+                    
                     for book in books:
-                        author_str = f" by {book.get('author', 'Unknown')}" if book.get('author') else ""
+                        author_str = f" by {book.get('author')}" if book.get('author') else ""
                         with st.expander(f"**{book['title']}**{author_str} - {book['finished_date']}"):
-                            col1, col2, col3 = st.columns(3)
+                            col1, col2, col3 = st.columns([2, 2, 1])
                             with col1:
-                                st.write(f"**Rating:** {book.get('rating', 'N/A')}/10" if book.get('rating') else "**Rating:** N/A")
-                            with col2:
                                 st.write(f"**Finished:** {book['finished_date']}")
+                            with col2:
+                                rating = book.get('rating')
+                                st.write(f"**Rating:** {rating}/10" if rating else "**Rating:** N/A")
                             with col3:
                                 if st.button("Delete", key=f"delete_book_{book['id']}"):
                                     delete_response = make_authenticated_request("DELETE", f"/books/{book['id']}")
@@ -926,15 +1071,85 @@ def music_page():
                 music_list = response.json()
                 
                 if music_list:
+                    # Display music in grid layout
+                    st.markdown("### Your Music")
+                    cols_per_row = 4
+                    
+                    for i in range(0, len(music_list), cols_per_row):
+                        cols = st.columns(cols_per_row)
+                        for j, music in enumerate(music_list[i:i+cols_per_row]):
+                            with cols[j]:
+                                thumbnail_url = music.get("thumbnail_url")
+                                
+                                # Display thumbnail
+                                image_displayed = False
+                                if thumbnail_url and thumbnail_url.strip() and thumbnail_url != "N/A":
+                                    if thumbnail_url.startswith("http://") or thumbnail_url.startswith("https://"):
+                                        try:
+                                            st.markdown(
+                                                f'<img src="{thumbnail_url}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
+                                                unsafe_allow_html=True
+                                            )
+                                            image_displayed = True
+                                        except:
+                                            pass
+                                        
+                                        if not image_displayed:
+                                            try:
+                                                st.image(thumbnail_url, use_container_width=True)
+                                                image_displayed = True
+                                            except:
+                                                pass
+                                    elif thumbnail_url.startswith("data:"):
+                                        # Handle base64 data URLs
+                                        try:
+                                            st.markdown(
+                                                f'<img src="{thumbnail_url}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
+                                                unsafe_allow_html=True
+                                            )
+                                            image_displayed = True
+                                        except:
+                                            pass
+                                
+                                if not image_displayed:
+                                    st.markdown(
+                                        f'<div style="width:100%;height:250px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:48px;margin-bottom:10px;">🎵</div>', 
+                                        unsafe_allow_html=True
+                                    )
+                                
+                                # Show title
+                                st.write(f"**{music['title']}**")
+                                
+                                # Show artist
+                                if music.get('artist'):
+                                    st.caption(f"by {music['artist']}")
+                                
+                                # Show album
+                                if music.get('album'):
+                                    st.caption(f"Album: {music['album']}")
+                                
+                                # Show listened date
+                                st.caption(f"Listened: {music['listened_date']}")
+                                
+                                # Show rating
+                                rating = music.get('rating')
+                                if rating:
+                                    st.caption(f"Rating: {rating}/10")
+                    
+                    # Details section below
+                    st.markdown("---")
+                    st.markdown("### Music Details")
+                    
                     for music in music_list:
-                        artist_album = f" by {music.get('artist', 'Unknown')}" if music.get('artist') else ""
+                        artist_str = f" by {music.get('artist')}" if music.get('artist') else ""
                         album_str = f" ({music.get('album')})" if music.get('album') else ""
-                        with st.expander(f"**{music['title']}**{artist_album}{album_str} - {music['listened_date']}"):
-                            col1, col2, col3 = st.columns(3)
+                        with st.expander(f"**{music['title']}**{artist_str}{album_str} - {music['listened_date']}"):
+                            col1, col2, col3 = st.columns([2, 2, 1])
                             with col1:
-                                st.write(f"**Rating:** {music.get('rating', 'N/A')}/10" if music.get('rating') else "**Rating:** N/A")
-                            with col2:
                                 st.write(f"**Listened:** {music['listened_date']}")
+                            with col2:
+                                rating = music.get('rating')
+                                st.write(f"**Rating:** {rating}/10" if rating else "**Rating:** N/A")
                             with col3:
                                 if st.button("Delete", key=f"delete_music_{music['id']}"):
                                     delete_response = make_authenticated_request("DELETE", f"/music/{music['id']}")
@@ -1000,6 +1215,268 @@ def music_page():
                         if response.status_code == 201:
                             if "music_selected_result" in st.session_state:
                                 del st.session_state["music_selected_result"]
+                            st.success("Music entry added successfully!")
+                            st.rerun()
+                        else:
+                            st.error(f"Failed to add music: {response.text}")
+                    except requests.exceptions.ConnectionError:
+                        st.error("Cannot connect to API. Make sure the backend is running.")
+
+
+def manual_entry_page():
+    """Manual Entry page for adding media with custom metadata and thumbnails"""
+    st.title("➕ Manual Entry")
+    st.markdown("---")
+    st.markdown("Enter media metadata manually and upload custom thumbnails")
+    
+    # Media type selector
+    media_type = st.selectbox(
+        "Select Media Type",
+        ["Movie", "TV Show", "Book", "Music"],
+        key="manual_entry_type"
+    )
+    
+    st.markdown("---")
+    
+    # Form based on media type
+    if media_type == "Movie":
+        with st.form("manual_movie_form"):
+            st.subheader("Movie Details")
+            title = st.text_input("Title *", placeholder="Movie title")
+            year = st.number_input("Year", min_value=1900, max_value=date.today().year + 1, value=date.today().year)
+            watched_date = st.date_input("Watched Date *", value=date.today())
+            rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5)
+            notes = st.text_area("Notes", placeholder="Optional notes")
+            
+            st.markdown("---")
+            st.subheader("Thumbnail (Optional)")
+            uploaded_file = st.file_uploader(
+                "Upload thumbnail image",
+                type=["png", "jpg", "jpeg", "gif", "webp"],
+                key="manual_movie_thumbnail"
+            )
+            
+            thumbnail_url = None
+            file_bytes = None
+            if uploaded_file is not None:
+                # Read file bytes once
+                file_bytes = uploaded_file.read()
+                # Display preview using bytes
+                st.image(file_bytes, width=200, caption="Thumbnail Preview")
+            
+            submit = st.form_submit_button("Add Movie")
+            
+            if submit:
+                if not title:
+                    st.error("Title is required!")
+                else:
+                    # Convert file bytes to base64 data URL if file was uploaded
+                    if file_bytes is not None:
+                        file_base64 = base64.b64encode(file_bytes).decode('utf-8')
+                        file_extension = uploaded_file.name.split('.')[-1].lower()
+                        mime_types = {
+                            'png': 'image/png',
+                            'jpg': 'image/jpeg',
+                            'jpeg': 'image/jpeg',
+                            'gif': 'image/gif',
+                            'webp': 'image/webp'
+                        }
+                        mime_type = mime_types.get(file_extension, 'image/jpeg')
+                        thumbnail_url = f"data:{mime_type};base64,{file_base64}"
+                    
+                    data = {
+                        "title": title,
+                        "year": int(year) if year else None,
+                        "watched_date": str(watched_date),
+                        "rating": float(rating) if rating else None,
+                        "notes": notes if notes else None,
+                        "thumbnail_url": thumbnail_url
+                    }
+                    try:
+                        response = make_authenticated_request("POST", "/movies/", json=data)
+                        if response.status_code == 201:
+                            st.success("Movie added successfully!")
+                            st.rerun()
+                        else:
+                            st.error(f"Failed to add movie: {response.text}")
+                    except requests.exceptions.ConnectionError:
+                        st.error("Cannot connect to API. Make sure the backend is running.")
+    
+    elif media_type == "TV Show":
+        with st.form("manual_tv_form"):
+            st.subheader("TV Show Details")
+            title = st.text_input("Title *", placeholder="TV Show title")
+            season = st.number_input("Season", min_value=1, value=1)
+            watched_date = st.date_input("Watched Date *", value=date.today(), key="manual_tv_date")
+            rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="manual_tv_rating")
+            notes = st.text_area("Notes", placeholder="Optional notes", key="manual_tv_notes")
+            
+            st.markdown("---")
+            st.subheader("Thumbnail (Optional)")
+            uploaded_file = st.file_uploader(
+                "Upload thumbnail image",
+                type=["png", "jpg", "jpeg", "gif", "webp"],
+                key="manual_tv_thumbnail"
+            )
+            
+            thumbnail_url = None
+            file_bytes = None
+            if uploaded_file is not None:
+                file_bytes = uploaded_file.read()
+                st.image(file_bytes, width=200, caption="Thumbnail Preview")
+            
+            submit = st.form_submit_button("Add TV Show")
+            
+            if submit:
+                if not title:
+                    st.error("Title is required!")
+                else:
+                    if file_bytes is not None:
+                        file_base64 = base64.b64encode(file_bytes).decode('utf-8')
+                        file_extension = uploaded_file.name.split('.')[-1].lower()
+                        mime_types = {
+                            'png': 'image/png',
+                            'jpg': 'image/jpeg',
+                            'jpeg': 'image/jpeg',
+                            'gif': 'image/gif',
+                            'webp': 'image/webp'
+                        }
+                        mime_type = mime_types.get(file_extension, 'image/jpeg')
+                        thumbnail_url = f"data:{mime_type};base64,{file_base64}"
+                    
+                    data = {
+                        "title": title,
+                        "season": int(season) if season else None,
+                        "watched_date": str(watched_date),
+                        "rating": float(rating) if rating else None,
+                        "notes": notes if notes else None,
+                        "thumbnail_url": thumbnail_url
+                    }
+                    try:
+                        response = make_authenticated_request("POST", "/tv-shows/", json=data)
+                        if response.status_code == 201:
+                            st.success("TV Show added successfully!")
+                            st.rerun()
+                        else:
+                            st.error(f"Failed to add TV show: {response.text}")
+                    except requests.exceptions.ConnectionError:
+                        st.error("Cannot connect to API. Make sure the backend is running.")
+    
+    elif media_type == "Book":
+        with st.form("manual_book_form"):
+            st.subheader("Book Details")
+            title = st.text_input("Title *", placeholder="Book title")
+            author = st.text_input("Author", placeholder="Author name")
+            finished_date = st.date_input("Finished Date *", value=date.today(), key="manual_book_date")
+            rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="manual_book_rating")
+            notes = st.text_area("Notes", placeholder="Optional notes", key="manual_book_notes")
+            
+            st.markdown("---")
+            st.subheader("Thumbnail (Optional)")
+            uploaded_file = st.file_uploader(
+                "Upload thumbnail image",
+                type=["png", "jpg", "jpeg", "gif", "webp"],
+                key="manual_book_thumbnail"
+            )
+            
+            thumbnail_url = None
+            file_bytes = None
+            if uploaded_file is not None:
+                file_bytes = uploaded_file.read()
+                st.image(file_bytes, width=200, caption="Thumbnail Preview")
+            
+            submit = st.form_submit_button("Add Book")
+            
+            if submit:
+                if not title:
+                    st.error("Title is required!")
+                else:
+                    if file_bytes is not None:
+                        file_base64 = base64.b64encode(file_bytes).decode('utf-8')
+                        file_extension = uploaded_file.name.split('.')[-1].lower()
+                        mime_types = {
+                            'png': 'image/png',
+                            'jpg': 'image/jpeg',
+                            'jpeg': 'image/jpeg',
+                            'gif': 'image/gif',
+                            'webp': 'image/webp'
+                        }
+                        mime_type = mime_types.get(file_extension, 'image/jpeg')
+                        thumbnail_url = f"data:{mime_type};base64,{file_base64}"
+                    
+                    data = {
+                        "title": title,
+                        "author": author if author else None,
+                        "finished_date": str(finished_date),
+                        "rating": float(rating) if rating else None,
+                        "notes": notes if notes else None,
+                        "thumbnail_url": thumbnail_url
+                    }
+                    try:
+                        response = make_authenticated_request("POST", "/books/", json=data)
+                        if response.status_code == 201:
+                            st.success("Book added successfully!")
+                            st.rerun()
+                        else:
+                            st.error(f"Failed to add book: {response.text}")
+                    except requests.exceptions.ConnectionError:
+                        st.error("Cannot connect to API. Make sure the backend is running.")
+    
+    elif media_type == "Music":
+        with st.form("manual_music_form"):
+            st.subheader("Music Details")
+            title = st.text_input("Title *", placeholder="Song/Album/Band name")
+            artist = st.text_input("Artist/Band", placeholder="Artist or band name")
+            album = st.text_input("Album", placeholder="Album name (if applicable)")
+            listened_date = st.date_input("Listened Date *", value=date.today(), key="manual_music_date")
+            rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="manual_music_rating")
+            notes = st.text_area("Notes", placeholder="Optional notes", key="manual_music_notes")
+            
+            st.markdown("---")
+            st.subheader("Thumbnail (Optional)")
+            uploaded_file = st.file_uploader(
+                "Upload thumbnail image",
+                type=["png", "jpg", "jpeg", "gif", "webp"],
+                key="manual_music_thumbnail"
+            )
+            
+            thumbnail_url = None
+            file_bytes = None
+            if uploaded_file is not None:
+                file_bytes = uploaded_file.read()
+                st.image(file_bytes, width=200, caption="Thumbnail Preview")
+            
+            submit = st.form_submit_button("Add Music")
+            
+            if submit:
+                if not title:
+                    st.error("Title is required!")
+                else:
+                    if file_bytes is not None:
+                        file_base64 = base64.b64encode(file_bytes).decode('utf-8')
+                        file_extension = uploaded_file.name.split('.')[-1].lower()
+                        mime_types = {
+                            'png': 'image/png',
+                            'jpg': 'image/jpeg',
+                            'jpeg': 'image/jpeg',
+                            'gif': 'image/gif',
+                            'webp': 'image/webp'
+                        }
+                        mime_type = mime_types.get(file_extension, 'image/jpeg')
+                        thumbnail_url = f"data:{mime_type};base64,{file_base64}"
+                    
+                    data = {
+                        "title": title,
+                        "artist": artist if artist else None,
+                        "album": album if album else None,
+                        "listened_date": str(listened_date),
+                        "rating": float(rating) if rating else None,
+                        "notes": notes if notes else None,
+                        "thumbnail_url": thumbnail_url
+                    }
+                    try:
+                        response = make_authenticated_request("POST", "/music/", json=data)
+                        if response.status_code == 201:
                             st.success("Music entry added successfully!")
                             st.rerun()
                         else:

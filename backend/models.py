@@ -24,6 +24,7 @@ class Movie(Base):
     watched_date = Column(Date, nullable=False, index=True)
     rating = Column(Float)
     notes = Column(String)
+    thumbnail_url = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -49,6 +50,7 @@ class Book(Base):
     finished_date = Column(Date, nullable=False, index=True)
     rating = Column(Float)
     notes = Column(String)
+    thumbnail_url = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -62,5 +64,6 @@ class Music(Base):
     listened_date = Column(Date, nullable=False, index=True)
     rating = Column(Float)
     notes = Column(String)
+    thumbnail_url = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 

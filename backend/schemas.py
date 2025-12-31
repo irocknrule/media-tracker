@@ -30,6 +30,7 @@ class MovieBase(BaseModel):
     watched_date: date
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
+    thumbnail_url: Optional[str] = None
 
 
 class MovieCreate(MovieBase):
@@ -42,6 +43,7 @@ class MovieUpdate(BaseModel):
     watched_date: Optional[date] = None
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
+    thumbnail_url: Optional[str] = None
 
 
 class Movie(MovieBase):
@@ -90,6 +92,7 @@ class BookBase(BaseModel):
     finished_date: date
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
+    thumbnail_url: Optional[str] = None
 
 
 class BookCreate(BookBase):
@@ -102,6 +105,7 @@ class BookUpdate(BaseModel):
     finished_date: Optional[date] = None
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
+    thumbnail_url: Optional[str] = None
 
 
 class Book(BookBase):
@@ -120,6 +124,7 @@ class MusicBase(BaseModel):
     listened_date: date
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
+    thumbnail_url: Optional[str] = None
 
 
 class MusicCreate(MusicBase):
@@ -133,6 +138,7 @@ class MusicUpdate(BaseModel):
     listened_date: Optional[date] = None
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
+    thumbnail_url: Optional[str] = None
 
 
 class Music(MusicBase):
