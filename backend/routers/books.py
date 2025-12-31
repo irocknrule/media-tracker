@@ -1,0 +1,93 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from datetime import date
+from backend.database import get_db
+from backend.models import Book as BookModel, User
+from backend.schemas import Book, BookCreate, BookUpdate
+from backend.routers.auth import get_current_user
+
+router = APIRouter(prefix="/books", tags=["books"])
+
+
+@router.get("/", response_model=List[Book])
+def get_books(
+    skip: int = 0,
+    limit: int = 100,
+    year: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all books with optional filtering"""
+    query = db.query(BookModel)
+    if year:
+        query = query.filter(BookModel.finished_date >= date(year, 1, 1)).filter(
+            BookModel.finished_date <= date(year, 12, 31)
+        )
+    books = query.order_by(BookModel.finished_date.desc()).offset(skip).limit(limit).all()
+    return books
+
+
+@router.get("/{book_id}", response_model=Book)
+def get_book(
+    book_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get a specific book by ID"""
+    book = db.query(BookModel).filter(BookModel.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    return book
+
+
+@router.post("/", response_model=Book, status_code=status.HTTP_201_CREATED)
+def create_book(
+    book: BookCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a new book entry"""
+    db_book = BookModel(**book.dict())
+    db.add(db_book)
+    db.commit()
+    db.refresh(db_book)
+    return db_book
+
+
+@router.put("/{book_id}", response_model=Book)
+def update_book(
+    book_id: int,
+    book_update: BookUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update a book entry"""
+    db_book = db.query(BookModel).filter(BookModel.id == book_id).first()
+    if not db_book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    
+    update_data = book_update.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_book, field, value)
+    
+    db.commit()
+    db.refresh(db_book)
+    return db_book
+
+
+@router.delete("/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_book(
+    book_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a book entry"""
+    db_book = db.query(BookModel).filter(BookModel.id == book_id).first()
+    if not db_book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    
+    db.delete(db_book)
+    db.commit()
+    return None
+
