@@ -1,13 +1,23 @@
 # Personal Media Tracker
 
-A secure local media tracking application to track Movies, TV Shows, Books, and Music throughout the year with year-end analytics and year-over-year comparisons.
+A secure local media tracking application to track Movies, TV Shows, Books, Music, and Daily Habits throughout the year with comprehensive analytics and year-over-year comparisons.
 
 ## Features
 
 - **Media Tracking**: Track Movies, TV Shows, Books, and Music (albums, records, bands)
+- **Daily Habit Tracker**: Log and track daily habits including:
+  - Exercise (Workout, Yoga, Running, Biking) with metrics for minutes, distance, and elevation
+  - Mindfulness (Meditation) with time tracking
+  - Music Practice (Guitar, Drums) with practice time
+- **Calendar Views**: Visualize habit completion with Monthly, Quarterly, and Yearly calendar views
+- **Habit Analytics**: Comprehensive analytics with charts showing:
+  - Total sessions, minutes, distances, and elevations
+  - Daily activity trends
+  - Habit type distributions
+  - Time frame filters (Month, Quarter, Year, Custom)
 - **Secure Access**: Password-protected authentication
-- **Analytics**: Year-end summaries and year-over-year comparisons
-- **Modern UI**: Streamlit frontend with intuitive forms
+- **Analytics**: Year-end summaries and year-over-year comparisons for media
+- **Modern UI**: Streamlit frontend with intuitive forms and interactive charts
 - **RESTful API**: FastAPI backend with comprehensive routes
 
 ## Architecture
@@ -32,11 +42,13 @@ media-tracker/
 │   │   ├── tv_shows.py
 │   │   ├── books.py
 │   │   ├── music.py
+│   │   ├── habits.py
 │   │   ├── analytics.py
 │   │   └── auth.py
 │   └── schemas.py           # Pydantic schemas
 ├── frontend/
 │   └── app.py               # Streamlit application
+├── migrate_add_habits.py    # Database migration for habit tracking
 ├── requirements.txt
 └── README.md
 ```
@@ -51,6 +63,11 @@ pip install -r requirements.txt
 2. Initialize the database:
 ```bash
 python -m backend.database
+```
+
+   This will automatically run all migrations including the habit tracking tables. If you need to run the habit migration separately:
+```bash
+python migrate_add_habits.py
 ```
 
 3. Set up API keys (optional but recommended):
@@ -89,6 +106,33 @@ uvicorn backend.main:app --reload
 ```bash
 streamlit run frontend/app.py
 ```
+
+## Usage
+
+### Media Tracker
+- Navigate to **Media Tracker** tab to track Movies, TV Shows, Books, and Music
+- Use search functionality to find media items from external APIs
+- Add ratings, notes, and custom thumbnails
+- View analytics by year with visual summaries
+
+### Habit Tracker
+- Navigate to **Habit Tracker** tab to log daily habits
+- **Log Habits**: Select a date and log your daily activities:
+  - Exercise: Workout (minutes), Yoga (minutes), Running (distance/elevation), Biking (distance/elevation)
+  - Mindfulness: Meditation (minutes)
+  - Music Practice: Guitar (minutes), Drums (minutes)
+- **Calendar**: View habit completion across different time periods:
+  - Monthly view with habit icons on each day
+  - Quarterly view showing 3 months side-by-side
+  - Yearly view with all 12 months
+- **Analytics**: View comprehensive statistics:
+  - Total sessions, minutes, distances, and elevations
+  - Breakdown by habit type with charts
+  - Daily activity trends
+  - Filter by time frame (This Month, This Quarter, This Year, Last Month, Last Quarter, Last Year, or Custom date range)
+- **Delete Options**: 
+  - Delete individual habit entries if entered by mistake
+  - Delete all habits for a specific day
 
 ## Default Credentials
 
