@@ -17,71 +17,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Initialize session state
-if "access_token" not in st.session_state:
-    st.session_state.access_token = None
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-
-# Try to restore session from query params (for page refresh)
-# Streamlit's session state persists during the browser session but not across full refreshes
-# So we use URL query parameters as a bridge
-if not st.session_state.authenticated:
-    token = None
-    try:
-        # Use experimental API (available in Streamlit 1.28.1)
-        if hasattr(st, 'experimental_get_query_params'):
-            params = st.experimental_get_query_params()
-            # Debug: Check what we got
-            # st.write(f"Debug - Query params: {params}")
-            if params and "token" in params:
-                token_list = params["token"]
-                if isinstance(token_list, list) and len(token_list) > 0:
-                    token = token_list[0]
-                elif isinstance(token_list, str):
-                    token = token_list
-    except Exception as e:
-        # Silently fail - user will need to log in
-        pass
-    
-    if token:
-        # Validate token by checking if it's still valid
-        try:
-            response = requests.get(
-                f"{API_BASE_URL}/auth/me",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=5
-            )
-            if response.status_code == 200:
-                st.session_state.access_token = token
-                st.session_state.authenticated = True
-                # Keep token in URL for future refreshes - don't clear it here!
-                # Only clear it when user explicitly logs out
-                # Rerun to update the UI
-                st.rerun()
-            else:
-                # Token invalid - clear it from URL
-                try:
-                    if hasattr(st, 'experimental_set_query_params'):
-                        st.experimental_set_query_params()
-                except:
-                    pass
-        except Exception as e:
-            # Token validation failed - clear it from URL
-            try:
-                if hasattr(st, 'experimental_set_query_params'):
-                    st.experimental_set_query_params()
-            except:
-                pass
-
 
 def make_authenticated_request(method: str, endpoint: str, **kwargs):
-    """Make an authenticated API request"""
-    headers = kwargs.get("headers", {})
-    if st.session_state.access_token:
-        headers["Authorization"] = f"Bearer {st.session_state.access_token}"
-    kwargs["headers"] = headers
-    
+    """Make an API request"""
     url = f"{API_BASE_URL}{endpoint}"
     
     if method == "GET":
@@ -218,94 +156,11 @@ def display_search_results(results: list, key_prefix: str):
     return selected_result
 
 
-def login_page():
-    """Login page"""
-    st.title("🔐 Login")
-    st.markdown("---")
-    
-    with st.form("login_form"):
-        username = st.text_input("Username", value="admin")
-        password = st.text_input("Password", type="password", value="admin123")
-        submit = st.form_submit_button("Login")
-        
-        if submit:
-            try:
-                response = requests.post(
-                    f"{API_BASE_URL}/auth/login",
-                    params={"username": username, "password": password}
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    token = data["access_token"]
-                    st.session_state.access_token = token
-                    st.session_state.authenticated = True
-                    # Store token in URL for persistence across refreshes
-                    # Use JavaScript to directly set it in the URL (more reliable)
-                    st.markdown(f"""
-                    <script>
-                    // Add token to URL for persistence across page refreshes
-                    const url = new URL(window.location);
-                    url.searchParams.set('token', '{token}');
-                    window.history.replaceState({{}}, '', url);
-                    </script>
-                    """, unsafe_allow_html=True)
-                    
-                    # Also try Streamlit's method as backup
-                    try:
-                        if hasattr(st, 'experimental_set_query_params'):
-                            st.experimental_set_query_params(**{"token": [token]})
-                    except:
-                        pass
-                    
-                    st.success("Login successful! Your session will persist across page refreshes.")
-                    st.rerun()
-                else:
-                    st.error("Invalid username or password")
-            except requests.exceptions.ConnectionError:
-                st.error("Cannot connect to API. Make sure the backend is running on http://localhost:8000")
-
-
-def logout():
-    """Logout function"""
-    if st.session_state.access_token:
-        try:
-            make_authenticated_request(
-                "POST",
-                "/auth/logout",
-                params={"token": st.session_state.access_token}
-            )
-        except:
-            pass
-    st.session_state.access_token = None
-    st.session_state.authenticated = False
-    # Clear token from localStorage
-    clear_token_script = """
-    <script>
-    window.localStorage.removeItem('media_tracker_token');
-    </script>
-    """
-    st.markdown(clear_token_script, unsafe_allow_html=True)
-    # Clear token from query params if available
-    try:
-        if hasattr(st, 'experimental_set_query_params'):
-            st.experimental_set_query_params()
-        elif hasattr(st, 'query_params') and "token" in st.query_params:
-            del st.query_params["token"]
-    except:
-        pass
-    st.rerun()
-
-
 def main_app():
     """Main application"""
     # Sidebar
     with st.sidebar:
         st.title("📚 Media Tracker")
-        st.markdown("---")
-        
-        if st.button("🚪 Logout"):
-            logout()
-        
         st.markdown("---")
         st.markdown("### Navigation")
         page = st.radio(
@@ -506,7 +361,7 @@ def movies_page():
 
 
 def tv_shows_page():
-    """TV Shows tracking page"""
+    """TV Shows tracking page - Plex-style with show and season posters"""
     st.title("📺 TV Shows")
     st.markdown("---")
     
@@ -526,59 +381,23 @@ def tv_shows_page():
                 tv_shows = response.json()
                 
                 if tv_shows:
-                    # Group TV shows by title
-                    shows_dict = defaultdict(list)
-                    for tv_show in tv_shows:
-                        shows_dict[tv_show['title']].append(tv_show)
-                    
-                    # Display grouped TV shows
+                    # Display TV shows in grid layout with show posters
                     st.markdown("### Your TV Shows")
                     cols_per_row = 4
-                    show_titles = sorted(shows_dict.keys())
                     
-                    for i in range(0, len(show_titles), cols_per_row):
+                    for i in range(0, len(tv_shows), cols_per_row):
                         cols = st.columns(cols_per_row)
-                        for j, show_title in enumerate(show_titles[i:i+cols_per_row]):
+                        for j, show in enumerate(tv_shows[i:i+cols_per_row]):
                             with cols[j]:
-                                seasons_list = shows_dict[show_title]
-                                # Get the first season's thumbnail (or fetch one)
-                                first_season = seasons_list[0]
-                                thumbnail_url = first_season.get("thumbnail_url")
-                                
-                                # If no thumbnail in DB, try to fetch it from TVMaze and save it
-                                if not thumbnail_url or not thumbnail_url.strip() or thumbnail_url == "N/A":
-                                    cache_key = f"tv_thumbnail_fetch_{show_title}"
-                                    if cache_key not in st.session_state:
-                                        try:
-                                            fetched_thumbnail = get_tv_show_thumbnail(show_title)
-                                            if fetched_thumbnail:
-                                                # Update all seasons for this show with the thumbnail
-                                                for season in seasons_list:
-                                                    try:
-                                                        update_data = {"thumbnail_url": fetched_thumbnail}
-                                                        make_authenticated_request(
-                                                            "PUT", 
-                                                            f"/tv-shows/{season.get('id')}", 
-                                                            json=update_data
-                                                        )
-                                                    except:
-                                                        pass
-                                                thumbnail_url = fetched_thumbnail
-                                                st.session_state[cache_key] = fetched_thumbnail
-                                            else:
-                                                st.session_state[cache_key] = None
-                                        except:
-                                            st.session_state[cache_key] = None
-                                    elif st.session_state[cache_key]:
-                                        thumbnail_url = st.session_state[cache_key]
-                                
-                                # Display thumbnail
+                                # Display show poster
+                                show_poster = show.get("show_thumbnail_url")
                                 image_displayed = False
-                                if thumbnail_url and thumbnail_url.strip() and thumbnail_url != "N/A":
-                                    if thumbnail_url.startswith("http://") or thumbnail_url.startswith("https://"):
+                                
+                                if show_poster and show_poster.strip() and show_poster != "N/A":
+                                    if show_poster.startswith("http://") or show_poster.startswith("https://"):
                                         try:
                                             st.markdown(
-                                                f'<img src="{thumbnail_url}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
+                                                f'<img src="{show_poster}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
                                                 unsafe_allow_html=True
                                             )
                                             image_displayed = True
@@ -587,15 +406,14 @@ def tv_shows_page():
                                         
                                         if not image_displayed:
                                             try:
-                                                st.image(thumbnail_url, use_container_width=True)
+                                                st.image(show_poster, use_container_width=True)
                                                 image_displayed = True
                                             except:
                                                 pass
-                                    elif thumbnail_url.startswith("data:"):
-                                        # Handle base64 data URLs
+                                    elif show_poster.startswith("data:"):
                                         try:
                                             st.markdown(
-                                                f'<img src="{thumbnail_url}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
+                                                f'<img src="{show_poster}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
                                                 unsafe_allow_html=True
                                             )
                                             image_displayed = True
@@ -609,60 +427,130 @@ def tv_shows_page():
                                     )
                                 
                                 # Show title
-                                st.write(f"**{show_title}**")
+                                st.write(f"**{show['title']}**")
                                 
-                                # Count seasons and get date range
-                                season_count = len(seasons_list)
-                                season_numbers = sorted([s.get('season') for s in seasons_list if s.get('season')])
-                                dates = sorted([s.get('watched_date') for s in seasons_list if s.get('watched_date')])
+                                # Show year and genres
+                                if show.get('year'):
+                                    st.caption(f"Year: {show['year']}")
+                                if show.get('genres'):
+                                    st.caption(f"Genres: {show['genres']}")
                                 
-                                # Show season count
+                                # Count seasons
+                                season_count = len(show.get('seasons', []))
                                 if season_count == 1:
-                                    st.caption(f"1 season watched")
-                                else:
-                                    st.caption(f"{season_count} seasons watched")
+                                    st.caption(f"1 season")
+                                elif season_count > 1:
+                                    st.caption(f"{season_count} seasons")
                                 
-                                # Show season numbers
-                                if season_numbers:
-                                    season_str = ", ".join([f"S{sn}" for sn in season_numbers])
-                                    st.caption(f"Seasons: {season_str}")
-                                
-                                # Show date range
-                                if dates:
-                                    if len(dates) == 1:
-                                        st.caption(f"Watched: {dates[0]}")
-                                    else:
-                                        st.caption(f"Dates: {dates[0]} to {dates[-1]}")
+                                # Show overall rating
+                                overall_rating = show.get('overall_rating')
+                                if overall_rating:
+                                    st.caption(f"Rating: {overall_rating}/10")
                     
-                    # Details section below
+                    # Details section below - Plex-style with seasons grouped by year
                     st.markdown("---")
-                    st.markdown("### Season Details")
+                    st.markdown("### Show & Season Details")
                     
-                    for show_title in sorted(shows_dict.keys()):
-                        seasons_list = shows_dict[show_title]
-                        with st.expander(f"**{show_title}** - {len(seasons_list)} season{'s' if len(seasons_list) != 1 else ''}"):
-                            for season in sorted(seasons_list, key=lambda x: x.get('season', 0) or 0):
-                                col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
-                                with col1:
-                                    season_num = season.get('season', '?')
-                                    st.write(f"**Season {season_num}**")
-                                with col2:
-                                    st.write(f"Watched: {season.get('watched_date', 'N/A')}")
-                                with col3:
-                                    rating = season.get('rating')
-                                    st.write(f"Rating: {rating}/10" if rating else "Rating: N/A")
-                                with col4:
-                                    if st.button("Delete", key=f"delete_tv_{season['id']}"):
-                                        delete_response = make_authenticated_request("DELETE", f"/tv-shows/{season['id']}")
-                                        if delete_response.status_code == 204:
-                                            st.success("Season deleted!")
-                                            st.rerun()
+                    for show in tv_shows:
+                        seasons = show.get('seasons', [])
+                        show_year = show.get('year', '')
+                        year_str = f" ({show_year})" if show_year else ""
+                        
+                        with st.expander(f"**{show['title']}**{year_str}"):
+                            # Show-level information
+                            col1, col2, col3 = st.columns([2, 2, 1])
+                            with col1:
+                                if show.get('genres'):
+                                    st.write(f"**Genres:** {show['genres']}")
+                            with col2:
+                                overall_rating = show.get('overall_rating')
+                                if overall_rating:
+                                    st.write(f"**Overall Rating:** {overall_rating}/10")
+                            with col3:
+                                if st.button("Delete Show", key=f"delete_show_{show['id']}"):
+                                    delete_response = make_authenticated_request("DELETE", f"/tv-shows/{show['id']}")
+                                    if delete_response.status_code == 204:
+                                        st.success("Show deleted!")
+                                        st.rerun()
+                            
+                            if seasons:
+                                st.markdown("---")
+                                st.markdown("#### Seasons")
                                 
-                                if season.get('notes'):
-                                    st.caption(f"Notes: {season['notes']}")
+                                # Group seasons by year (from watched_date)
+                                seasons_by_year = defaultdict(list)
+                                for season in seasons:
+                                    watched_date = season.get('watched_date', '')
+                                    if watched_date:
+                                        year = str(watched_date).split('-')[0]
+                                        seasons_by_year[year].append(season)
+                                    else:
+                                        seasons_by_year['Unknown'].append(season)
                                 
-                                if season != seasons_list[-1]:
-                                    st.markdown("---")
+                                # Display seasons grouped by year
+                                for year in sorted(seasons_by_year.keys(), reverse=True):
+                                    year_seasons = sorted(seasons_by_year[year], key=lambda x: x.get('season_number', 0))
+                                    
+                                    st.markdown(f"**{year}**")
+                                    
+                                    # Display season posters in a grid
+                                    cols_per_row_seasons = 6
+                                    for i in range(0, len(year_seasons), cols_per_row_seasons):
+                                        cols = st.columns(cols_per_row_seasons)
+                                        for j, season in enumerate(year_seasons[i:i+cols_per_row_seasons]):
+                                            with cols[j]:
+                                                # Display season poster
+                                                season_poster = season.get("season_thumbnail_url")
+                                                image_displayed = False
+                                                
+                                                if season_poster and season_poster.strip() and season_poster != "N/A":
+                                                    if season_poster.startswith("http://") or season_poster.startswith("https://"):
+                                                        try:
+                                                            st.markdown(
+                                                                f'<img src="{season_poster}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:5px;max-height:150px;object-fit:contain;">', 
+                                                                unsafe_allow_html=True
+                                                            )
+                                                            image_displayed = True
+                                                        except:
+                                                            pass
+                                                    elif season_poster.startswith("data:"):
+                                                        try:
+                                                            st.markdown(
+                                                                f'<img src="{season_poster}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:5px;max-height:150px;object-fit:contain;">', 
+                                                                unsafe_allow_html=True
+                                                            )
+                                                            image_displayed = True
+                                                        except:
+                                                            pass
+                                                
+                                                if not image_displayed:
+                                                    st.markdown(
+                                                        f'<div style="width:100%;height:100px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:24px;margin-bottom:5px;">S{season.get("season_number", "?")}</div>', 
+                                                        unsafe_allow_html=True
+                                                    )
+                                                
+                                                # Season info
+                                                st.caption(f"**S{season.get('season_number', '?')}**")
+                                                st.caption(f"{season.get('watched_date', 'N/A')}")
+                                                rating = season.get('rating')
+                                                if rating:
+                                                    st.caption(f"⭐ {rating}/10")
+                                                
+                                                # Delete button for season
+                                                if st.button("×", key=f"delete_season_{season['id']}", help="Delete this season"):
+                                                    delete_response = make_authenticated_request("DELETE", f"/tv-shows/seasons/{season['id']}")
+                                                    if delete_response.status_code == 204:
+                                                        st.success("Season deleted!")
+                                                        st.rerun()
+                                                
+                                                # Show notes if any
+                                                if season.get('notes'):
+                                                    with st.expander("Notes"):
+                                                        st.caption(season['notes'])
+                                    
+                                    st.markdown("")  # Add spacing between years
+                            else:
+                                st.info("No seasons tracked yet for this show.")
                 else:
                     st.info("No TV shows found. Add your first TV show in the 'Add TV Show' tab!")
             else:
@@ -783,7 +671,7 @@ def tv_shows_page():
                             rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="tv_rating")
                             notes = st.text_area("Notes", placeholder="Optional notes", key="tv_notes")
                             
-                            submit = st.form_submit_button("Add TV Show")
+                            submit = st.form_submit_button("Add TV Show Season")
                             
                             if submit:
                                 if not title:
@@ -798,7 +686,7 @@ def tv_shows_page():
                                         "thumbnail_url": selected_season.get("image", "") if selected_season.get("image") else None
                                     }
                                     try:
-                                        response = make_authenticated_request("POST", "/tv-shows/", json=data)
+                                        response = make_authenticated_request("POST", "/tv-shows/legacy", json=data)
                                         if response.status_code == 201:
                                             # Clear all TV show related session state
                                             if "tv_selected_result" in st.session_state:
@@ -809,7 +697,7 @@ def tv_shows_page():
                                                 del st.session_state["tv_selected_tvmaze_id"]
                                             if "tv_selected_season" in st.session_state:
                                                 del st.session_state["tv_selected_season"]
-                                            st.success("TV Show added successfully!")
+                                            st.success("TV Show Season added successfully!")
                                             st.rerun()
                                         else:
                                             st.error(f"Failed to add TV show: {response.text}")
@@ -827,7 +715,7 @@ def tv_shows_page():
                     rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="tv_rating_fallback")
                     notes = st.text_area("Notes", placeholder="Optional notes", key="tv_notes_fallback")
                     
-                    submit = st.form_submit_button("Add TV Show")
+                    submit = st.form_submit_button("Add TV Show Season")
                     
                     if submit:
                         if not title:
@@ -841,11 +729,11 @@ def tv_shows_page():
                                 "notes": notes if notes else None
                             }
                             try:
-                                response = make_authenticated_request("POST", "/tv-shows/", json=data)
+                                response = make_authenticated_request("POST", "/tv-shows/legacy", json=data)
                                 if response.status_code == 201:
                                     if "tv_selected_result" in st.session_state:
                                         del st.session_state["tv_selected_result"]
-                                    st.success("TV Show added successfully!")
+                                    st.success("TV Show Season added successfully!")
                                     st.rerun()
                                 else:
                                     st.error(f"Failed to add TV show: {response.text}")
@@ -860,7 +748,7 @@ def tv_shows_page():
                 rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="tv_rating")
                 notes = st.text_area("Notes", placeholder="Optional notes", key="tv_notes")
                 
-                submit = st.form_submit_button("Add TV Show")
+                submit = st.form_submit_button("Add TV Show Season")
                 
                 if submit:
                     if not title:
@@ -874,9 +762,9 @@ def tv_shows_page():
                             "notes": notes if notes else None
                         }
                         try:
-                            response = make_authenticated_request("POST", "/tv-shows/", json=data)
+                            response = make_authenticated_request("POST", "/tv-shows/legacy", json=data)
                             if response.status_code == 201:
-                                st.success("TV Show added successfully!")
+                                st.success("TV Show Season added successfully!")
                                 st.rerun()
                             else:
                                 st.error(f"Failed to add TV show: {response.text}")
@@ -1303,64 +1191,156 @@ def manual_entry_page():
                         st.error("Cannot connect to API. Make sure the backend is running.")
     
     elif media_type == "TV Show":
-        with st.form("manual_tv_form"):
-            st.subheader("TV Show Details")
-            title = st.text_input("Title *", placeholder="TV Show title")
-            season = st.number_input("Season", min_value=1, value=1)
-            watched_date = st.date_input("Watched Date *", value=date.today(), key="manual_tv_date")
-            rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="manual_tv_rating")
-            notes = st.text_area("Notes", placeholder="Optional notes", key="manual_tv_notes")
+        # Enhanced TV Show entry with show-level and season-level posters
+        st.subheader("TV Show Details")
+        st.markdown("*Enter show information first, then add season details below*")
+        
+        # Step 1: Show-level information
+        with st.container():
+            st.markdown("### Show Information")
+            col1, col2 = st.columns([2, 1])
             
-            st.markdown("---")
-            st.subheader("Thumbnail (Optional)")
-            uploaded_file = st.file_uploader(
-                "Upload thumbnail image",
-                type=["png", "jpg", "jpeg", "gif", "webp"],
-                key="manual_tv_thumbnail"
-            )
+            with col1:
+                show_title = st.text_input("Show Title *", placeholder="e.g., Party Down", key="manual_tv_show_title")
+                show_year = st.number_input("Show Year", min_value=1900, max_value=date.today().year + 1, value=date.today().year, key="manual_tv_show_year")
+                show_genres = st.text_input("Genres (comma-separated)", placeholder="e.g., Comedy, Drama", key="manual_tv_genres")
+                show_overall_rating = st.slider("Overall Show Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="manual_tv_overall_rating")
             
-            thumbnail_url = None
-            file_bytes = None
-            if uploaded_file is not None:
-                file_bytes = uploaded_file.read()
-                st.image(file_bytes, width=200, caption="Thumbnail Preview")
+            with col2:
+                st.markdown("**Show Poster**")
+                show_poster_file = st.file_uploader(
+                    "Upload show poster",
+                    type=["png", "jpg", "jpeg", "gif", "webp"],
+                    key="manual_tv_show_poster",
+                    help="Main poster for the entire series"
+                )
+                
+                show_poster_url = None
+                show_poster_bytes = None
+                if show_poster_file is not None:
+                    show_poster_bytes = show_poster_file.read()
+                    st.image(show_poster_bytes, width=150, caption="Show Poster Preview")
+        
+        st.markdown("---")
+        
+        # Step 2: Season-level information
+        with st.form("manual_tv_season_form"):
+            st.markdown("### Season Details")
+            col1, col2 = st.columns([2, 1])
             
-            submit = st.form_submit_button("Add TV Show")
+            with col1:
+                season_number = st.number_input("Season Number *", min_value=1, value=1, key="manual_tv_season")
+                watched_date = st.date_input("Watched Date *", value=date.today(), key="manual_tv_watched_date")
+                season_rating = st.slider("Season Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="manual_tv_season_rating")
+                season_notes = st.text_area("Season Notes", placeholder="Optional notes about this season", key="manual_tv_season_notes")
+            
+            with col2:
+                st.markdown("**Season Poster**")
+                season_poster_file = st.file_uploader(
+                    "Upload season poster",
+                    type=["png", "jpg", "jpeg", "gif", "webp"],
+                    key="manual_tv_season_poster",
+                    help="Specific poster for this season"
+                )
+                
+                season_poster_url = None
+                season_poster_bytes = None
+                if season_poster_file is not None:
+                    season_poster_bytes = season_poster_file.read()
+                    st.image(season_poster_bytes, width=150, caption="Season Poster Preview")
+            
+            submit = st.form_submit_button("Add TV Show with Season")
             
             if submit:
-                if not title:
-                    st.error("Title is required!")
+                if not show_title:
+                    st.error("Show title is required!")
                 else:
-                    if file_bytes is not None:
-                        file_base64 = base64.b64encode(file_bytes).decode('utf-8')
-                        file_extension = uploaded_file.name.split('.')[-1].lower()
-                        mime_types = {
-                            'png': 'image/png',
-                            'jpg': 'image/jpeg',
-                            'jpeg': 'image/jpeg',
-                            'gif': 'image/gif',
-                            'webp': 'image/webp'
-                        }
-                        mime_type = mime_types.get(file_extension, 'image/jpeg')
-                        thumbnail_url = f"data:{mime_type};base64,{file_base64}"
-                    
-                    data = {
-                        "title": title,
-                        "season": int(season) if season else None,
-                        "watched_date": str(watched_date),
-                        "rating": float(rating) if rating else None,
-                        "notes": notes if notes else None,
-                        "thumbnail_url": thumbnail_url
-                    }
                     try:
-                        response = make_authenticated_request("POST", "/tv-shows/", json=data)
-                        if response.status_code == 201:
-                            st.success("TV Show added successfully!")
+                        # Convert show poster to base64 if uploaded
+                        if show_poster_bytes is not None:
+                            file_base64 = base64.b64encode(show_poster_bytes).decode('utf-8')
+                            file_extension = show_poster_file.name.split('.')[-1].lower()
+                            mime_types = {
+                                'png': 'image/png',
+                                'jpg': 'image/jpeg',
+                                'jpeg': 'image/jpeg',
+                                'gif': 'image/gif',
+                                'webp': 'image/webp'
+                            }
+                            mime_type = mime_types.get(file_extension, 'image/jpeg')
+                            show_poster_url = f"data:{mime_type};base64,{file_base64}"
+                        
+                        # Convert season poster to base64 if uploaded
+                        if season_poster_bytes is not None:
+                            file_base64 = base64.b64encode(season_poster_bytes).decode('utf-8')
+                            file_extension = season_poster_file.name.split('.')[-1].lower()
+                            mime_types = {
+                                'png': 'image/png',
+                                'jpg': 'image/jpeg',
+                                'jpeg': 'image/jpeg',
+                                'gif': 'image/gif',
+                                'webp': 'image/webp'
+                            }
+                            mime_type = mime_types.get(file_extension, 'image/jpeg')
+                            season_poster_url = f"data:{mime_type};base64,{file_base64}"
+                        
+                        # First, check if show exists
+                        shows_response = make_authenticated_request("GET", "/tv-shows/")
+                        show_id = None
+                        
+                        if shows_response.status_code == 200:
+                            shows = shows_response.json()
+                            for show in shows:
+                                if show['title'].lower() == show_title.lower():
+                                    show_id = show['id']
+                                    # Update show metadata if needed
+                                    update_data = {
+                                        "year": int(show_year) if show_year else None,
+                                        "genres": show_genres if show_genres else None,
+                                        "overall_rating": float(show_overall_rating) if show_overall_rating else None,
+                                    }
+                                    if show_poster_url:
+                                        update_data["show_thumbnail_url"] = show_poster_url
+                                    make_authenticated_request("PUT", f"/tv-shows/{show_id}", json=update_data)
+                                    break
+                        
+                        # If show doesn't exist, create it
+                        if show_id is None:
+                            show_data = {
+                                "title": show_title,
+                                "year": int(show_year) if show_year else None,
+                                "genres": show_genres if show_genres else None,
+                                "overall_rating": float(show_overall_rating) if show_overall_rating else None,
+                                "show_thumbnail_url": show_poster_url
+                            }
+                            show_response = make_authenticated_request("POST", "/tv-shows/", json=show_data)
+                            if show_response.status_code == 201:
+                                show_id = show_response.json()['id']
+                            else:
+                                st.error(f"Failed to create show: {show_response.text}")
+                                st.stop()
+                        
+                        # Now create the season
+                        season_data = {
+                            "show_id": show_id,
+                            "season_number": int(season_number),
+                            "watched_date": str(watched_date),
+                            "rating": float(season_rating) if season_rating else None,
+                            "notes": season_notes if season_notes else None,
+                            "season_thumbnail_url": season_poster_url
+                        }
+                        
+                        season_response = make_authenticated_request("POST", "/tv-shows/seasons", json=season_data)
+                        if season_response.status_code == 201:
+                            st.success(f"TV Show '{show_title}' Season {season_number} added successfully!")
                             st.rerun()
                         else:
-                            st.error(f"Failed to add TV show: {response.text}")
+                            st.error(f"Failed to add season: {season_response.text}")
+                    
                     except requests.exceptions.ConnectionError:
                         st.error("Cannot connect to API. Make sure the backend is running.")
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
     
     elif media_type == "Book":
         with st.form("manual_book_form"):
@@ -1551,8 +1531,5 @@ def analytics_page():
 
 
 # Main app logic
-if not st.session_state.authenticated:
-    login_page()
-else:
-    main_app()
+main_app()
 

@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, List
 
 
 # Authentication schemas
@@ -55,13 +55,41 @@ class Movie(MovieBase):
 
 
 # TV Show schemas
-class TVShowBase(BaseModel):
-    title: str
-    season: Optional[int] = None
+class TVShowSeasonBase(BaseModel):
+    season_number: int
     watched_date: date
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
-    thumbnail_url: Optional[str] = None
+    season_thumbnail_url: Optional[str] = None
+
+
+class TVShowSeasonCreate(TVShowSeasonBase):
+    show_id: int
+
+
+class TVShowSeasonUpdate(BaseModel):
+    season_number: Optional[int] = None
+    watched_date: Optional[date] = None
+    rating: Optional[float] = Field(None, ge=0, le=10)
+    notes: Optional[str] = None
+    season_thumbnail_url: Optional[str] = None
+
+
+class TVShowSeason(TVShowSeasonBase):
+    id: int
+    show_id: int
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class TVShowBase(BaseModel):
+    title: str
+    year: Optional[int] = None
+    genres: Optional[str] = None
+    overall_rating: Optional[float] = Field(None, ge=0, le=10)
+    show_thumbnail_url: Optional[str] = None
 
 
 class TVShowCreate(TVShowBase):
@@ -70,19 +98,33 @@ class TVShowCreate(TVShowBase):
 
 class TVShowUpdate(BaseModel):
     title: Optional[str] = None
-    season: Optional[int] = None
-    watched_date: Optional[date] = None
-    rating: Optional[float] = Field(None, ge=0, le=10)
-    notes: Optional[str] = None
-    thumbnail_url: Optional[str] = None
+    year: Optional[int] = None
+    genres: Optional[str] = None
+    overall_rating: Optional[float] = Field(None, ge=0, le=10)
+    show_thumbnail_url: Optional[str] = None
 
 
 class TVShow(TVShowBase):
     id: int
     created_at: datetime
+    seasons: List['TVShowSeason'] = []
     
     class Config:
         from_attributes = True
+
+
+# Legacy schemas for backward compatibility
+class TVShowLegacyBase(BaseModel):
+    title: str
+    season: Optional[int] = None
+    watched_date: date
+    rating: Optional[float] = Field(None, ge=0, le=10)
+    notes: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+
+
+class TVShowLegacyCreate(TVShowLegacyBase):
+    pass
 
 
 # Book schemas

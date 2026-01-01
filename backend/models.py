@@ -33,12 +33,30 @@ class TVShow(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, nullable=False, index=True)
-    season = Column(Integer)
+    year = Column(Integer)  # Overall show year
+    genres = Column(String)  # Comma-separated genres
+    overall_rating = Column(Float)  # Overall show rating
+    show_thumbnail_url = Column(String)  # Overall show poster
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationship to seasons
+    seasons = relationship("TVShowSeason", back_populates="show", cascade="all, delete-orphan")
+
+
+class TVShowSeason(Base):
+    __tablename__ = "tv_show_seasons"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    show_id = Column(Integer, ForeignKey("tv_shows.id"), nullable=False, index=True)
+    season_number = Column(Integer, nullable=False)
     watched_date = Column(Date, nullable=False, index=True)
     rating = Column(Float)
     notes = Column(String)
-    thumbnail_url = Column(String)
+    season_thumbnail_url = Column(String)  # Individual season poster
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationship back to show
+    show = relationship("TVShow", back_populates="seasons")
 
 
 class Book(Base):
