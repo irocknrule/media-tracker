@@ -846,6 +846,10 @@ def books_page():
                                 if book.get('author'):
                                     st.caption(f"by {book['author']}")
                                 
+                                # Show pages
+                                if book.get('pages'):
+                                    st.caption(f"Pages: {book['pages']}")
+                                
                                 # Show finished date
                                 st.caption(f"Finished: {book['finished_date']}")
                                 
@@ -864,6 +868,8 @@ def books_page():
                             col1, col2, col3 = st.columns([2, 2, 1])
                             with col1:
                                 st.write(f"**Finished:** {book['finished_date']}")
+                                if book.get('pages'):
+                                    st.write(f"**Pages:** {book['pages']}")
                             with col2:
                                 rating = book.get('rating')
                                 st.write(f"**Rating:** {rating}/10" if rating else "**Rating:** N/A")
@@ -908,6 +914,7 @@ def books_page():
         with st.form("add_book_form"):
             title = st.text_input("Title *", value=default_title, placeholder="Book title")
             author = st.text_input("Author", value=default_author, placeholder="Author name")
+            pages = st.number_input("Number of Pages", min_value=1, value=None, step=1, key="book_pages", help="Optional: Enter the total number of pages")
             finished_date = st.date_input("Finished Date *", value=date.today(), key="book_date")
             rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="book_rating")
             notes = st.text_area("Notes", placeholder="Optional notes", key="book_notes")
@@ -921,6 +928,7 @@ def books_page():
                     data = {
                         "title": title,
                         "author": author if author else None,
+                        "pages": int(pages) if pages else None,
                         "finished_date": str(finished_date),
                         "rating": float(rating) if rating else None,
                         "notes": notes if notes else None
@@ -1220,8 +1228,8 @@ def manual_entry_page():
                 if show_poster_file is not None:
                     show_poster_bytes = show_poster_file.read()
                     st.image(show_poster_bytes, width=150, caption="Show Poster Preview")
-        
-        st.markdown("---")
+            
+            st.markdown("---")
         
         # Step 2: Season-level information
         with st.form("manual_tv_season_form"):
@@ -1347,6 +1355,7 @@ def manual_entry_page():
             st.subheader("Book Details")
             title = st.text_input("Title *", placeholder="Book title")
             author = st.text_input("Author", placeholder="Author name")
+            pages = st.number_input("Number of Pages", min_value=1, value=None, step=1, key="manual_book_pages", help="Optional: Enter the total number of pages")
             finished_date = st.date_input("Finished Date *", value=date.today(), key="manual_book_date")
             rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="manual_book_rating")
             notes = st.text_area("Notes", placeholder="Optional notes", key="manual_book_notes")
@@ -1387,6 +1396,7 @@ def manual_entry_page():
                     data = {
                         "title": title,
                         "author": author if author else None,
+                        "pages": int(pages) if pages else None,
                         "finished_date": str(finished_date),
                         "rating": float(rating) if rating else None,
                         "notes": notes if notes else None,
@@ -1465,6 +1475,43 @@ def manual_entry_page():
                         st.error("Cannot connect to API. Make sure the backend is running.")
 
 
+def display_media_thumbnail(thumbnail_url, placeholder_emoji="📷", width="100%", max_height="350px"):
+    """Helper function to display a media thumbnail"""
+    image_displayed = False
+    if thumbnail_url and thumbnail_url.strip() and thumbnail_url != "N/A":
+        if thumbnail_url.startswith("http://") or thumbnail_url.startswith("https://"):
+            try:
+                st.markdown(
+                    f'<img src="{thumbnail_url}" style="width:{width};height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:{max_height};object-fit:contain;">', 
+                    unsafe_allow_html=True
+                )
+                image_displayed = True
+            except:
+                pass
+            
+            if not image_displayed:
+                try:
+                    st.image(thumbnail_url, use_container_width=True)
+                    image_displayed = True
+                except:
+                    pass
+        elif thumbnail_url.startswith("data:"):
+            try:
+                st.markdown(
+                    f'<img src="{thumbnail_url}" style="width:{width};height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:{max_height};object-fit:contain;">', 
+                    unsafe_allow_html=True
+                )
+                image_displayed = True
+            except:
+                pass
+    
+    if not image_displayed:
+        st.markdown(
+            f'<div style="width:{width};height:250px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:48px;margin-bottom:10px;">{placeholder_emoji}</div>', 
+            unsafe_allow_html=True
+        )
+
+
 def analytics_page():
     """Analytics page"""
     st.title("📊 Analytics")
@@ -1480,13 +1527,20 @@ def analytics_page():
                 st.info("No data available yet. Start tracking your media to see analytics!")
                 return
             
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("Year Summary")
-                selected_year = st.selectbox("Select Year", available_years)
+            # Sidebar controls
+            with st.sidebar:
+                st.markdown("### Analytics Filters")
+                selected_year = st.selectbox("Select Year", available_years, key="analytics_year")
+                media_type = st.selectbox(
+                    "Select Media Type",
+                    ["Movies", "TV Shows", "Books", "Music"],
+                    key="analytics_media_type"
+                )
+                st.markdown("---")
                 
+                # Year Summary in sidebar
                 if selected_year:
+                    st.markdown("### Year Summary")
                     summary_response = make_authenticated_request("GET", f"/analytics/year/{selected_year}")
                     if summary_response.status_code == 200:
                         summary = summary_response.json()
@@ -1496,34 +1550,123 @@ def analytics_page():
                         st.metric("Books", summary["books_count"])
                         st.metric("Music", summary["music_count"])
                         
-                        st.markdown("### Average Ratings")
+                        # Pages statistics for books
+                        if summary.get("total_pages_read") is not None:
+                            st.metric("Total Pages Read", f"{summary['total_pages_read']:,}")
+                        if summary.get("avg_pages_per_book") is not None:
+                            st.metric("Avg Pages per Book", f"{summary['avg_pages_per_book']:.1f}")
+                        
+                        st.markdown("#### Average Ratings")
                         if summary.get("avg_movie_rating"):
-                            st.write(f"**Movies:** {summary['avg_movie_rating']:.2f}/10")
+                            st.caption(f"Movies: {summary['avg_movie_rating']:.2f}/10")
                         if summary.get("avg_tv_rating"):
-                            st.write(f"**TV Shows:** {summary['avg_tv_rating']:.2f}/10")
+                            st.caption(f"TV Shows: {summary['avg_tv_rating']:.2f}/10")
                         if summary.get("avg_book_rating"):
-                            st.write(f"**Books:** {summary['avg_book_rating']:.2f}/10")
+                            st.caption(f"Books: {summary['avg_book_rating']:.2f}/10")
                         if summary.get("avg_music_rating"):
-                            st.write(f"**Music:** {summary['avg_music_rating']:.2f}/10")
+                            st.caption(f"Music: {summary['avg_music_rating']:.2f}/10")
             
-            with col2:
-                st.subheader("Year Comparison")
-                if len(available_years) >= 2:
-                    year1 = st.selectbox("Year 1", available_years, key="year1")
-                    year2 = st.selectbox("Year 2", available_years, key="year2", index=1 if len(available_years) > 1 else 0)
-                    
-                    if year1 and year2 and year1 != year2:
-                        compare_response = make_authenticated_request("GET", f"/analytics/compare/{year1}/{year2}")
-                        if compare_response.status_code == 200:
-                            comparison = compare_response.json()
-                            
-                            st.write(f"**{year1} vs {year2}**")
-                            st.metric("Movies Change", f"{comparison['movies_change']:.1f}%")
-                            st.metric("TV Shows Change", f"{comparison['tv_shows_change']:.1f}%")
-                            st.metric("Books Change", f"{comparison['books_change']:.1f}%")
-                            st.metric("Music Change", f"{comparison['music_change']:.1f}%")
-                else:
-                    st.info("Need at least 2 years of data to compare")
+            # Main content area - display results
+            if selected_year:
+                st.subheader(f"{media_type} for {selected_year}")
+                # Fetch media items for the selected type and year
+                params = {"year": selected_year}
+                
+                if media_type == "Movies":
+                    response = make_authenticated_request("GET", "/movies/", params=params)
+                    if response.status_code == 200:
+                        items = response.json()
+                        if items:
+                            st.markdown(f"### {len(items)} Movie{'' if len(items) == 1 else 's'}")
+                            cols_per_row = 4
+                            for i in range(0, len(items), cols_per_row):
+                                cols = st.columns(cols_per_row)
+                                for j, item in enumerate(items[i:i+cols_per_row]):
+                                    with cols[j]:
+                                        display_media_thumbnail(item.get("thumbnail_url"), "🎬")
+                                        st.write(f"**{item['title']}**")
+                                        if item.get('year'):
+                                            st.caption(f"Year: {item['year']}")
+                                        st.caption(f"Watched: {item['watched_date']}")
+                                        rating = item.get('rating')
+                                        if rating:
+                                            st.caption(f"Rating: {rating}/10")
+                        else:
+                            st.info(f"No movies found for {selected_year}")
+                
+                elif media_type == "TV Shows":
+                    response = make_authenticated_request("GET", "/tv-shows/", params=params)
+                    if response.status_code == 200:
+                        shows = response.json()
+                        if shows:
+                            st.markdown(f"### {len(shows)} TV Show{'' if len(shows) == 1 else 's'}")
+                            cols_per_row = 4
+                            for i in range(0, len(shows), cols_per_row):
+                                cols = st.columns(cols_per_row)
+                                for j, show in enumerate(shows[i:i+cols_per_row]):
+                                    with cols[j]:
+                                        display_media_thumbnail(show.get("show_thumbnail_url"), "📺")
+                                        st.write(f"**{show['title']}**")
+                                        if show.get('year'):
+                                            st.caption(f"Year: {show['year']}")
+                                        if show.get('genres'):
+                                            st.caption(f"Genres: {show['genres']}")
+                                        season_count = len(show.get('seasons', []))
+                                        if season_count:
+                                            st.caption(f"{season_count} season{'' if season_count == 1 else 's'}")
+                                        overall_rating = show.get('overall_rating')
+                                        if overall_rating:
+                                            st.caption(f"Rating: {overall_rating}/10")
+                        else:
+                            st.info(f"No TV shows found for {selected_year}")
+                
+                elif media_type == "Books":
+                    response = make_authenticated_request("GET", "/books/", params=params)
+                    if response.status_code == 200:
+                        items = response.json()
+                        if items:
+                            st.markdown(f"### {len(items)} Book{'' if len(items) == 1 else 's'}")
+                            cols_per_row = 4
+                            for i in range(0, len(items), cols_per_row):
+                                cols = st.columns(cols_per_row)
+                                for j, item in enumerate(items[i:i+cols_per_row]):
+                                    with cols[j]:
+                                        display_media_thumbnail(item.get("thumbnail_url"), "📖")
+                                        st.write(f"**{item['title']}**")
+                                        if item.get('author'):
+                                            st.caption(f"by {item['author']}")
+                                        if item.get('pages'):
+                                            st.caption(f"Pages: {item['pages']}")
+                                        st.caption(f"Finished: {item['finished_date']}")
+                                        rating = item.get('rating')
+                                        if rating:
+                                            st.caption(f"Rating: {rating}/10")
+                        else:
+                            st.info(f"No books found for {selected_year}")
+                
+                elif media_type == "Music":
+                    response = make_authenticated_request("GET", "/music/", params=params)
+                    if response.status_code == 200:
+                        items = response.json()
+                        if items:
+                            st.markdown(f"### {len(items)} Music Entry{'' if len(items) == 1 else 'ies'}")
+                            cols_per_row = 4
+                            for i in range(0, len(items), cols_per_row):
+                                cols = st.columns(cols_per_row)
+                                for j, item in enumerate(items[i:i+cols_per_row]):
+                                    with cols[j]:
+                                        display_media_thumbnail(item.get("thumbnail_url"), "🎵")
+                                        st.write(f"**{item['title']}**")
+                                        if item.get('artist'):
+                                            st.caption(f"by {item['artist']}")
+                                        if item.get('album'):
+                                            st.caption(f"Album: {item['album']}")
+                                        st.caption(f"Listened: {item['listened_date']}")
+                                        rating = item.get('rating')
+                                        if rating:
+                                            st.caption(f"Rating: {rating}/10")
+                        else:
+                            st.info(f"No music entries found for {selected_year}")
         else:
             st.error("Failed to load analytics data")
     except requests.exceptions.ConnectionError:

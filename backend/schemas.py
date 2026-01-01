@@ -135,6 +135,7 @@ class BookBase(BaseModel):
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    pages: Optional[int] = Field(None, ge=1)  # Number of pages (must be positive if provided)
 
 
 class BookCreate(BookBase):
@@ -148,6 +149,7 @@ class BookUpdate(BaseModel):
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    pages: Optional[int] = Field(None, ge=1)
 
 
 class Book(BookBase):
@@ -202,6 +204,8 @@ class YearSummary(BaseModel):
     avg_tv_rating: Optional[float] = None
     avg_book_rating: Optional[float] = None
     avg_music_rating: Optional[float] = None
+    total_pages_read: Optional[int] = None  # Total pages from all books
+    avg_pages_per_book: Optional[float] = None  # Average pages per book
 
 
 class YearComparison(BaseModel):

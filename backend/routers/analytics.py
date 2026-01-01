@@ -4,9 +4,8 @@ from sqlalchemy import func
 from typing import Optional
 from datetime import date
 from backend.database import get_db
-from backend.models import Movie, TVShow, Book, Music, User
+from backend.models import Movie, TVShow, Book, Music
 from backend.schemas import YearSummary, YearComparison
-from backend.routers.auth import get_current_user
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -14,8 +13,7 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 @router.get("/year/{year}", response_model=YearSummary)
 def get_year_summary(
     year: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """Get summary statistics for a specific year"""
     year_start = date(year, 1, 1)
@@ -44,6 +42,10 @@ def get_year_summary(
     ).all()
     books_count = len(books)
     avg_book_rating = sum(b.rating for b in books if b.rating) / len([b for b in books if b.rating]) if any(b.rating for b in books) else None
+    # Pages statistics
+    books_with_pages = [b for b in books if b.pages is not None]
+    total_pages_read = sum(b.pages for b in books_with_pages) if books_with_pages else None
+    avg_pages_per_book = sum(b.pages for b in books_with_pages) / len(books_with_pages) if books_with_pages else None
     
     # Music
     music = db.query(Music).filter(
@@ -62,7 +64,9 @@ def get_year_summary(
         avg_movie_rating=avg_movie_rating,
         avg_tv_rating=avg_tv_rating,
         avg_book_rating=avg_book_rating,
-        avg_music_rating=avg_music_rating
+        avg_music_rating=avg_music_rating,
+        total_pages_read=total_pages_read,
+        avg_pages_per_book=avg_pages_per_book
     )
 
 
@@ -70,12 +74,11 @@ def get_year_summary(
 def compare_years(
     year1: int,
     year2: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """Compare statistics between two years"""
-    summary1 = get_year_summary(year1, db, current_user)
-    summary2 = get_year_summary(year2, db, current_user)
+    summary1 = get_year_summary(year1, db)
+    summary2 = get_year_summary(year2, db)
     
     def calculate_change(old: int, new: int) -> float:
         if old == 0:
@@ -94,8 +97,7 @@ def compare_years(
 
 @router.get("/years")
 def get_available_years(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """Get list of years that have data"""
     years = set()

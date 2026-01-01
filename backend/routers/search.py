@@ -2,8 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from backend.database import get_db
-from backend.models import User
-from backend.routers.auth import get_current_user
 import requests
 import os
 import re
@@ -31,8 +29,7 @@ class SearchResult:
 
 @router.get("/movies")
 def search_movies(
-    query: str,
-    current_user: User = Depends(get_current_user)
+    query: str
 ):
     """Search for movies using OMDB API"""
     try:
@@ -87,8 +84,7 @@ def search_movies(
 
 @router.get("/tv-shows")
 def search_tv_shows(
-    query: str,
-    current_user: User = Depends(get_current_user)
+    query: str
 ):
     """Search for TV shows using TVMaze API (free, no API key needed)"""
     try:
@@ -143,8 +139,7 @@ def search_tv_shows(
 
 @router.get("/tv-shows/thumbnail")
 def get_tv_show_thumbnail(
-    title: str,
-    current_user: User = Depends(get_current_user)
+    title: str
 ):
     """Get thumbnail URL for a TV show by title"""
     try:
@@ -177,8 +172,7 @@ def get_tv_show_thumbnail(
 
 @router.get("/tv-shows/{tvmaze_id}/seasons")
 def get_tv_show_seasons(
-    tvmaze_id: int,
-    current_user: User = Depends(get_current_user)
+    tvmaze_id: int
 ):
     """Get all seasons for a TV show using TVMaze API"""
     try:
@@ -248,8 +242,7 @@ def get_tv_show_seasons(
 
 @router.get("/books")
 def search_books(
-    query: str,
-    current_user: User = Depends(get_current_user)
+    query: str
 ):
     """Search for books using Open Library API (free, no API key needed)"""
     try:
@@ -286,8 +279,7 @@ def search_books(
 
 @router.get("/music")
 def search_music(
-    query: str,
-    current_user: User = Depends(get_current_user)
+    query: str
 ):
     """Search for music albums using Last.fm API (free, API key recommended but not required for basic search)"""
     try:

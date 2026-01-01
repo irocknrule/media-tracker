@@ -69,6 +69,7 @@ class Book(Base):
     rating = Column(Float)
     notes = Column(String)
     thumbnail_url = Column(String)
+    pages = Column(Integer)  # Number of pages
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

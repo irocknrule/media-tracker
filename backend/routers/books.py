@@ -3,9 +3,8 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date
 from backend.database import get_db
-from backend.models import Book as BookModel, User
+from backend.models import Book as BookModel
 from backend.schemas import Book, BookCreate, BookUpdate
-from backend.routers.auth import get_current_user
 
 router = APIRouter(prefix="/books", tags=["books"])
 
@@ -15,8 +14,7 @@ def get_books(
     skip: int = 0,
     limit: int = 100,
     year: Optional[int] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """Get all books with optional filtering"""
     query = db.query(BookModel)
@@ -31,8 +29,7 @@ def get_books(
 @router.get("/{book_id}", response_model=Book)
 def get_book(
     book_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """Get a specific book by ID"""
     book = db.query(BookModel).filter(BookModel.id == book_id).first()
@@ -44,8 +41,7 @@ def get_book(
 @router.post("/", response_model=Book, status_code=status.HTTP_201_CREATED)
 def create_book(
     book: BookCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """Create a new book entry"""
     db_book = BookModel(**book.dict())
@@ -59,8 +55,7 @@ def create_book(
 def update_book(
     book_id: int,
     book_update: BookUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """Update a book entry"""
     db_book = db.query(BookModel).filter(BookModel.id == book_id).first()
@@ -79,8 +74,7 @@ def update_book(
 @router.delete("/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_book(
     book_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """Delete a book entry"""
     db_book = db.query(BookModel).filter(BookModel.id == book_id).first()
