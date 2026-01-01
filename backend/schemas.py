@@ -216,3 +216,50 @@ class YearComparison(BaseModel):
     books_change: float
     music_change: float
 
+
+# Habit schemas
+class HabitLogBase(BaseModel):
+    date: date
+    habit_type: str
+    metric_name: str
+    value: float
+    unit: str
+
+
+class HabitLogCreate(HabitLogBase):
+    pass
+
+
+class HabitLog(HabitLogBase):
+    id: int
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class HabitLogEntry(BaseModel):
+    """Individual habit log entry without date (date comes from batch)"""
+    habit_type: str
+    metric_name: str
+    value: float
+    unit: str
+
+
+class HabitLogBatchCreate(BaseModel):
+    """Batch create multiple habit logs for a single date"""
+    date: date
+    logs: List[HabitLogEntry]
+
+
+class HabitLogResponse(BaseModel):
+    """Response format for habit logs grouped by date"""
+    date: date
+    habits: dict  # Dictionary mapping habit_type to list of metrics
+
+
+class HabitCalendarEntry(BaseModel):
+    """Entry for calendar view showing which habits were done on a date"""
+    date: date
+    habit_types: List[str]  # List of habit types completed on this date
+

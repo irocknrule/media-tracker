@@ -1,6 +1,6 @@
 import streamlit as st
 import requests
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 from collections import defaultdict
 import json
@@ -158,30 +158,90 @@ def display_search_results(results: list, key_prefix: str):
 
 def main_app():
     """Main application"""
-    # Sidebar
-    with st.sidebar:
-        st.title("📚 Media Tracker")
-        st.markdown("---")
-        st.markdown("### Navigation")
-        page = st.radio(
-            "Go to",
-            ["Movies", "TV Shows", "Books", "Music", "Manual Entry", "Analytics"],
-            label_visibility="collapsed"
-        )
+    # Use session state to track selected category
+    if "selected_category" not in st.session_state:
+        st.session_state["selected_category"] = "Media Tracker"
     
-    # Main content
-    if page == "Movies":
-        movies_page()
-    elif page == "TV Shows":
-        tv_shows_page()
-    elif page == "Books":
-        books_page()
-    elif page == "Music":
-        music_page()
-    elif page == "Manual Entry":
-        manual_entry_page()
-    elif page == "Analytics":
-        analytics_page()
+    # Top-level category selection - styled as tabs
+    st.markdown("""
+        <style>
+        .category-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .category-tab {
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            text-align: center;
+            flex: 1;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    # Top-level tabs using columns for better layout
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📚 Media Tracker", use_container_width=True, 
+                     type="primary" if st.session_state["selected_category"] == "Media Tracker" else "secondary", 
+                     key="btn_media_tracker"):
+            st.session_state["selected_category"] = "Media Tracker"
+            st.rerun()
+    with col2:
+        if st.button("📅 Habit Tracker", use_container_width=True, 
+                     type="primary" if st.session_state["selected_category"] == "Habit Tracker" else "secondary", 
+                     key="btn_habit_tracker"):
+            st.session_state["selected_category"] = "Habit Tracker"
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # Sidebar - dynamic based on category
+    with st.sidebar:
+        st.title("📊 Personal Tracker")
+        st.markdown("---")
+        
+        # Show current category
+        if st.session_state["selected_category"] == "Media Tracker":
+            st.markdown("### 📚 Media Tracker")
+            st.markdown("---")
+            page = st.radio(
+                "Select Option",
+                ["Movies", "TV Shows", "Books", "Music", "Manual Entry", "Analytics"],
+                label_visibility="collapsed"
+            )
+        else:  # Habit Tracker
+            st.markdown("### 📅 Habit Tracker")
+            st.markdown("---")
+            page = st.radio(
+                "Select Option",
+                ["Log Habits", "Calendar", "Analytics"],
+                label_visibility="collapsed"
+            )
+    
+    # Main content routing
+    if st.session_state["selected_category"] == "Media Tracker":
+        if page == "Movies":
+            movies_page()
+        elif page == "TV Shows":
+            tv_shows_page()
+        elif page == "Books":
+            books_page()
+        elif page == "Music":
+            music_page()
+        elif page == "Manual Entry":
+            manual_entry_page()
+        elif page == "Analytics":
+            analytics_page()
+    else:  # Habit Tracker
+        if page == "Log Habits":
+            log_habits_tab()
+        elif page == "Calendar":
+            calendar_tab()
+        elif page == "Analytics":
+            habit_analytics_tab()
 
 
 def movies_page():
@@ -1671,6 +1731,1023 @@ def analytics_page():
             st.error("Failed to load analytics data")
     except requests.exceptions.ConnectionError:
         st.error("Cannot connect to API. Make sure the backend is running.")
+
+
+def habit_tracker_page():
+    """Habit Tracker page with Log Habits and Calendar tabs"""
+    st.title("📅 Daily Habit Tracker")
+    st.markdown("---")
+    
+    tab1, tab2 = st.tabs(["Log Habits", "Calendar"])
+    
+    with tab1:
+        log_habits_tab()
+    
+    with tab2:
+        calendar_tab()
+
+
+def log_habits_tab():
+    """Tab for logging daily habits"""
+    st.title("📝 Log Daily Habits")
+    st.markdown("---")
+    
+    # Date picker
+    selected_date = st.date_input("Date:", value=date.today(), key="habit_date")
+    
+    # Load existing habits for this date (for form)
+    existing_habits = {}
+    try:
+        response = make_authenticated_request("GET", f"/habits/date/{selected_date}")
+        if response.status_code == 200:
+            data = response.json()
+            existing_habits = data.get("habits", {})
+    except:
+        pass
+    
+    # Load detailed habits for deletion
+    existing_habits_detailed = []
+    try:
+        response = make_authenticated_request("GET", f"/habits/date/{selected_date}/detailed")
+        if response.status_code == 200:
+            existing_habits_detailed = response.json()
+    except:
+        pass
+    
+    # Show existing habits with delete options
+    if existing_habits_detailed:
+        st.markdown("---")
+        st.markdown("### 📋 Currently Saved Habits")
+        
+        # Group by habit type for display
+        habits_by_type = {}
+        for log in existing_habits_detailed:
+            habit_type = log.get("habit_type", "")
+            if habit_type not in habits_by_type:
+                habits_by_type[habit_type] = []
+            habits_by_type[habit_type].append(log)
+        
+        for habit_type, logs in habits_by_type.items():
+            # Clean up habit type name
+            parts = habit_type.split('_')
+            display_name = ' '.join(word.capitalize() for word in parts[1:]) if len(parts) > 1 else habit_type
+            
+            with st.expander(f"**{display_name}** ({len(logs)} metric{'s' if len(logs) > 1 else ''})"):
+                for log in logs:
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    with col1:
+                        metric_name = log.get("metric_name", "").capitalize()
+                        value = log.get("value", 0)
+                        unit = log.get("unit", "")
+                        st.write(f"{metric_name}: {value} {unit}")
+                    with col2:
+                        log_id = log.get("id")
+                        if st.button("🗑️ Delete", key=f"delete_habit_{log_id}", help="Delete this habit entry"):
+                            try:
+                                delete_response = make_authenticated_request("DELETE", f"/habits/{log_id}")
+                                if delete_response.status_code == 204:
+                                    st.success(f"Deleted {metric_name} entry!")
+                                    # Clear form state to reload
+                                    if f"habit_form_{selected_date}" in st.session_state:
+                                        del st.session_state[f"habit_form_{selected_date}"]
+                                    st.rerun()
+                                else:
+                                    st.error(f"Failed to delete: {delete_response.text}")
+                            except Exception as e:
+                                st.error(f"Error deleting habit: {str(e)}")
+                    with col3:
+                        st.write("")  # Spacer
+        
+        # Delete all button
+        st.markdown("---")
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col2:
+            if st.button("🗑️ Delete All Habits for This Day", key="delete_all_habits", type="secondary"):
+                try:
+                    delete_response = make_authenticated_request("DELETE", f"/habits/date/{selected_date}")
+                    if delete_response.status_code == 204:
+                        st.success("All habits for this day deleted successfully!")
+                        # Clear form state to reload
+                        if f"habit_form_{selected_date}" in st.session_state:
+                            del st.session_state[f"habit_form_{selected_date}"]
+                        st.rerun()
+                    else:
+                        st.error(f"Failed to delete: {delete_response.text}")
+                except Exception as e:
+                    st.error(f"Error deleting habits: {str(e)}")
+        
+        st.markdown("---")
+    
+    # Initialize session state for form values
+    if f"habit_form_{selected_date}" not in st.session_state:
+        st.session_state[f"habit_form_{selected_date}"] = {
+            "exercise_workout": {"checked": False, "minutes": ""},
+            "exercise_yoga": {"checked": False, "minutes": ""},
+            "exercise_running": {"checked": False, "distance": "", "elevation": ""},
+            "exercise_biking": {"checked": False, "distance": "", "elevation": ""},
+            "mindfulness_meditation": {"checked": False, "minutes": ""},
+            "music_guitar": {"checked": False, "minutes": ""},
+            "music_drums": {"checked": False, "minutes": ""},
+        }
+        
+        # Load existing data
+        if existing_habits:
+            for habit_type, metrics in existing_habits.items():
+                if habit_type in st.session_state[f"habit_form_{selected_date}"]:
+                    st.session_state[f"habit_form_{selected_date}"][habit_type]["checked"] = True
+                    for metric in metrics:
+                        metric_name = metric["metric_name"].lower()
+                        if metric_name == "minutes":
+                            st.session_state[f"habit_form_{selected_date}"][habit_type]["minutes"] = str(metric["value"])
+                        elif metric_name == "distance":
+                            st.session_state[f"habit_form_{selected_date}"][habit_type]["distance"] = str(metric["value"])
+                        elif metric_name == "elevation":
+                            st.session_state[f"habit_form_{selected_date}"][habit_type]["elevation"] = str(metric["value"])
+    
+    form_state = st.session_state[f"habit_form_{selected_date}"]
+    
+    # Exercise Section
+    st.markdown("---")
+    st.markdown("### 🏋️ Exercise")
+    
+    # Workout
+    workout_checked = st.checkbox("Workout", value=form_state["exercise_workout"]["checked"], key="workout_check")
+    if workout_checked:
+        workout_minutes = st.number_input("Minutes", min_value=0.0, value=float(form_state["exercise_workout"]["minutes"]) if form_state["exercise_workout"]["minutes"] else 0.0, step=1.0, key="workout_min")
+        form_state["exercise_workout"] = {"checked": True, "minutes": str(workout_minutes)}
+    else:
+        form_state["exercise_workout"] = {"checked": False, "minutes": ""}
+    
+    # Yoga
+    yoga_checked = st.checkbox("Yoga", value=form_state["exercise_yoga"]["checked"], key="yoga_check")
+    if yoga_checked:
+        yoga_minutes = st.number_input("Minutes", min_value=0.0, value=float(form_state["exercise_yoga"]["minutes"]) if form_state["exercise_yoga"]["minutes"] else 0.0, step=1.0, key="yoga_min")
+        form_state["exercise_yoga"] = {"checked": True, "minutes": str(yoga_minutes)}
+    else:
+        form_state["exercise_yoga"] = {"checked": False, "minutes": ""}
+    
+    # Running
+    running_checked = st.checkbox("Running", value=form_state["exercise_running"]["checked"], key="running_check")
+    if running_checked:
+        col1, col2 = st.columns(2)
+        with col1:
+            running_distance = st.number_input("Distance", min_value=0.0, value=float(form_state["exercise_running"]["distance"]) if form_state["exercise_running"]["distance"] else 0.0, step=0.1, key="running_dist")
+            st.caption("mi")
+        with col2:
+            running_elevation = st.number_input("Elevation", min_value=0.0, value=float(form_state["exercise_running"]["elevation"]) if form_state["exercise_running"]["elevation"] else 0.0, step=1.0, key="running_elev")
+            st.caption("ft")
+        form_state["exercise_running"] = {"checked": True, "distance": str(running_distance), "elevation": str(running_elevation)}
+    else:
+        form_state["exercise_running"] = {"checked": False, "distance": "", "elevation": ""}
+    
+    # Biking
+    biking_checked = st.checkbox("Biking", value=form_state["exercise_biking"]["checked"], key="biking_check")
+    if biking_checked:
+        col1, col2 = st.columns(2)
+        with col1:
+            biking_distance = st.number_input("Distance", min_value=0.0, value=float(form_state["exercise_biking"]["distance"]) if form_state["exercise_biking"]["distance"] else 0.0, step=0.1, key="biking_dist")
+            st.caption("mi")
+        with col2:
+            biking_elevation = st.number_input("Elevation", min_value=0.0, value=float(form_state["exercise_biking"]["elevation"]) if form_state["exercise_biking"]["elevation"] else 0.0, step=1.0, key="biking_elev")
+            st.caption("ft")
+        form_state["exercise_biking"] = {"checked": True, "distance": str(biking_distance), "elevation": str(biking_elevation)}
+    else:
+        form_state["exercise_biking"] = {"checked": False, "distance": "", "elevation": ""}
+    
+    # Mindfulness Section
+    st.markdown("---")
+    st.markdown("### 🧠 Mindfulness")
+    
+    meditation_checked = st.checkbox("Meditation", value=form_state["mindfulness_meditation"]["checked"], key="meditation_check")
+    if meditation_checked:
+        meditation_minutes = st.number_input("Minutes", min_value=0.0, value=float(form_state["mindfulness_meditation"]["minutes"]) if form_state["mindfulness_meditation"]["minutes"] else 0.0, step=1.0, key="meditation_min")
+        form_state["mindfulness_meditation"] = {"checked": True, "minutes": str(meditation_minutes)}
+    else:
+        form_state["mindfulness_meditation"] = {"checked": False, "minutes": ""}
+    
+    # Music Practice Section
+    st.markdown("---")
+    st.markdown("### 🎵 Music Practice")
+    
+    guitar_checked = st.checkbox("Guitar", value=form_state["music_guitar"]["checked"], key="guitar_check")
+    if guitar_checked:
+        guitar_minutes = st.number_input("Minutes", min_value=0.0, value=float(form_state["music_guitar"]["minutes"]) if form_state["music_guitar"]["minutes"] else 0.0, step=1.0, key="guitar_min")
+        form_state["music_guitar"] = {"checked": True, "minutes": str(guitar_minutes)}
+    else:
+        form_state["music_guitar"] = {"checked": False, "minutes": ""}
+    
+    drums_checked = st.checkbox("Drums", value=form_state["music_drums"]["checked"], key="drums_check")
+    if drums_checked:
+        drums_minutes = st.number_input("Minutes", min_value=0.0, value=float(form_state["music_drums"]["minutes"]) if form_state["music_drums"]["minutes"] else 0.0, step=1.0, key="drums_min")
+        form_state["music_drums"] = {"checked": True, "minutes": str(drums_minutes)}
+    else:
+        form_state["music_drums"] = {"checked": False, "minutes": ""}
+    
+    # Action buttons
+    st.markdown("---")
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        if st.button("Clear All", key="clear_habits"):
+            st.session_state[f"habit_form_{selected_date}"] = {
+                "exercise_workout": {"checked": False, "minutes": ""},
+                "exercise_yoga": {"checked": False, "minutes": ""},
+                "exercise_running": {"checked": False, "distance": "", "elevation": ""},
+                "exercise_biking": {"checked": False, "distance": "", "elevation": ""},
+                "mindfulness_meditation": {"checked": False, "minutes": ""},
+                "music_guitar": {"checked": False, "minutes": ""},
+                "music_drums": {"checked": False, "minutes": ""},
+            }
+            st.rerun()
+    
+    with col2:
+        if st.button("Save", key="save_habits", type="primary"):
+            # Build the logs array
+            logs = []
+            
+            # Exercise
+            if form_state["exercise_workout"]["checked"] and form_state["exercise_workout"]["minutes"]:
+                logs.append({
+                    "habit_type": "exercise_workout",
+                    "metric_name": "minutes",
+                    "value": float(form_state["exercise_workout"]["minutes"]),
+                    "unit": "min"
+                })
+            
+            if form_state["exercise_yoga"]["checked"] and form_state["exercise_yoga"]["minutes"]:
+                logs.append({
+                    "habit_type": "exercise_yoga",
+                    "metric_name": "minutes",
+                    "value": float(form_state["exercise_yoga"]["minutes"]),
+                    "unit": "min"
+                })
+            
+            if form_state["exercise_running"]["checked"]:
+                if form_state["exercise_running"]["distance"]:
+                    logs.append({
+                        "habit_type": "exercise_running",
+                        "metric_name": "distance",
+                        "value": float(form_state["exercise_running"]["distance"]),
+                        "unit": "mi"
+                    })
+                if form_state["exercise_running"]["elevation"]:
+                    logs.append({
+                        "habit_type": "exercise_running",
+                        "metric_name": "elevation",
+                        "value": float(form_state["exercise_running"]["elevation"]),
+                        "unit": "ft"
+                    })
+            
+            if form_state["exercise_biking"]["checked"]:
+                if form_state["exercise_biking"]["distance"]:
+                    logs.append({
+                        "habit_type": "exercise_biking",
+                        "metric_name": "distance",
+                        "value": float(form_state["exercise_biking"]["distance"]),
+                        "unit": "mi"
+                    })
+                if form_state["exercise_biking"]["elevation"]:
+                    logs.append({
+                        "habit_type": "exercise_biking",
+                        "metric_name": "elevation",
+                        "value": float(form_state["exercise_biking"]["elevation"]),
+                        "unit": "ft"
+                    })
+            
+            # Mindfulness
+            if form_state["mindfulness_meditation"]["checked"] and form_state["mindfulness_meditation"]["minutes"]:
+                logs.append({
+                    "habit_type": "mindfulness_meditation",
+                    "metric_name": "minutes",
+                    "value": float(form_state["mindfulness_meditation"]["minutes"]),
+                    "unit": "min"
+                })
+            
+            # Music
+            if form_state["music_guitar"]["checked"] and form_state["music_guitar"]["minutes"]:
+                logs.append({
+                    "habit_type": "music_guitar",
+                    "metric_name": "minutes",
+                    "value": float(form_state["music_guitar"]["minutes"]),
+                    "unit": "min"
+                })
+            
+            if form_state["music_drums"]["checked"] and form_state["music_drums"]["minutes"]:
+                logs.append({
+                    "habit_type": "music_drums",
+                    "metric_name": "minutes",
+                    "value": float(form_state["music_drums"]["minutes"]),
+                    "unit": "min"
+                })
+            
+            # Send to API
+            data = {
+                "date": str(selected_date),
+                "logs": logs
+            }
+            
+            try:
+                response = make_authenticated_request("POST", "/habits/", json=data)
+                if response.status_code == 201:
+                    saved_logs = response.json()
+                    habit_count = len(saved_logs)
+                    habit_summary = []
+                    
+                    # Group by habit type for summary
+                    habit_types = {}
+                    for log in saved_logs:
+                        habit_type = log.get("habit_type", "")
+                        metric_name = log.get("metric_name", "")
+                        value = log.get("value", 0)
+                        unit = log.get("unit", "")
+                        
+                        # Clean up habit type name
+                        parts = habit_type.split('_')
+                        display_name = ' '.join(word.capitalize() for word in parts[1:]) if len(parts) > 1 else habit_type
+                        
+                        if habit_type not in habit_types:
+                            habit_types[habit_type] = []
+                        habit_types[habit_type].append(f"{metric_name.capitalize()}: {value} {unit}")
+                    
+                    # Build summary message
+                    summary_parts = []
+                    for habit_type, metrics in habit_types.items():
+                        parts = habit_type.split('_')
+                        display_name = ' '.join(word.capitalize() for word in parts[1:]) if len(parts) > 1 else habit_type
+                        summary_parts.append(f"{display_name} ({', '.join(metrics)})")
+                    
+                    success_msg = f"✅ **Successfully saved {habit_count} habit{'s' if habit_count != 1 else ''} to database!**\n\n"
+                    success_msg += "**Saved habits:**\n"
+                    for summary in summary_parts:
+                        success_msg += f"• {summary}\n"
+                    
+                    st.success(success_msg)
+                    # Clear form state to reload from DB
+                    if f"habit_form_{selected_date}" in st.session_state:
+                        del st.session_state[f"habit_form_{selected_date}"]
+                    st.rerun()
+                else:
+                    st.error(f"Failed to save habits: {response.text}")
+            except requests.exceptions.ConnectionError:
+                st.error("Cannot connect to API. Make sure the backend is running.")
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+
+
+def calendar_tab():
+    """Calendar view showing habit completion by date"""
+    st.title("📅 Calendar View")
+    st.markdown("---")
+    
+    # View type selector
+    view_type = st.radio("View", ["Monthly", "Quarterly", "Yearly"], horizontal=True, key="calendar_view")
+    
+    # Get current date
+    today = date.today()
+    
+    # Navigation and date selection
+    if view_type == "Monthly":
+        # Month navigation
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col1:
+            if st.button("← Previous", key="prev_month"):
+                if "calendar_month" not in st.session_state:
+                    st.session_state["calendar_month"] = today
+                current_month = st.session_state["calendar_month"]
+                if current_month.month == 1:
+                    st.session_state["calendar_month"] = date(current_month.year - 1, 12, 1)
+                else:
+                    st.session_state["calendar_month"] = date(current_month.year, current_month.month - 1, 1)
+                st.rerun()
+        
+        with col2:
+            if "calendar_month" not in st.session_state:
+                st.session_state["calendar_month"] = today
+            current_month = st.session_state["calendar_month"]
+            st.markdown(f"### {current_month.strftime('%B %Y')}")
+        
+        with col3:
+            if st.button("Next →", key="next_month"):
+                current_month = st.session_state["calendar_month"]
+                if current_month.month == 12:
+                    st.session_state["calendar_month"] = date(current_month.year + 1, 1, 1)
+                else:
+                    st.session_state["calendar_month"] = date(current_month.year, current_month.month + 1, 1)
+                st.rerun()
+        
+        # Display monthly calendar
+        display_monthly_calendar(current_month)
+    
+    elif view_type == "Quarterly":
+        # Quarter navigation
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col1:
+            if st.button("← Previous", key="prev_quarter"):
+                if "calendar_quarter" not in st.session_state:
+                    st.session_state["calendar_quarter"] = today
+                current_date = st.session_state["calendar_quarter"]
+                quarter = (current_date.month - 1) // 3 + 1
+                year = current_date.year
+                if quarter == 1:
+                    st.session_state["calendar_quarter"] = date(year - 1, 10, 1)
+                else:
+                    st.session_state["calendar_quarter"] = date(year, (quarter - 2) * 3 + 1, 1)
+                st.rerun()
+        
+        with col2:
+            if "calendar_quarter" not in st.session_state:
+                st.session_state["calendar_quarter"] = today
+            current_date = st.session_state["calendar_quarter"]
+            quarter = (current_date.month - 1) // 3 + 1
+            quarter_names = {1: "Q1", 2: "Q2", 3: "Q3", 4: "Q4"}
+            st.markdown(f"### {quarter_names[quarter]} {current_date.year}")
+        
+        with col3:
+            if st.button("Next →", key="next_quarter"):
+                current_date = st.session_state["calendar_quarter"]
+                quarter = (current_date.month - 1) // 3 + 1
+                year = current_date.year
+                if quarter == 4:
+                    st.session_state["calendar_quarter"] = date(year + 1, 1, 1)
+                else:
+                    st.session_state["calendar_quarter"] = date(year, quarter * 3 + 1, 1)
+                st.rerun()
+        
+        # Display quarterly calendar
+        display_quarterly_calendar(st.session_state["calendar_quarter"])
+    
+    elif view_type == "Yearly":
+        # Year navigation
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col1:
+            if st.button("← Previous", key="prev_year"):
+                if "calendar_year" not in st.session_state:
+                    st.session_state["calendar_year"] = today.year
+                st.session_state["calendar_year"] -= 1
+                st.rerun()
+        
+        with col2:
+            if "calendar_year" not in st.session_state:
+                st.session_state["calendar_year"] = today.year
+            st.markdown(f"### {st.session_state['calendar_year']}")
+        
+        with col3:
+            if st.button("Next →", key="next_year"):
+                if "calendar_year" not in st.session_state:
+                    st.session_state["calendar_year"] = today.year
+                st.session_state["calendar_year"] += 1
+                st.rerun()
+        
+        # Display yearly calendar
+        display_yearly_calendar(st.session_state["calendar_year"])
+
+
+def display_monthly_calendar(month_date):
+    """Display a monthly calendar grid"""
+    import calendar
+    
+    # Get calendar data
+    cal = calendar.monthcalendar(month_date.year, month_date.month)
+    
+    # Get habit data for the month
+    start_date = date(month_date.year, month_date.month, 1)
+    if month_date.month == 12:
+        end_date = date(month_date.year + 1, 1, 1) - timedelta(days=1)
+    else:
+        end_date = date(month_date.year, month_date.month + 1, 1) - timedelta(days=1)
+    
+    habit_data = {}
+    try:
+        response = make_authenticated_request("GET", "/habits/calendar", params={
+            "start_date": str(start_date),
+            "end_date": str(end_date)
+        })
+        if response.status_code == 200:
+            entries = response.json()
+            for entry in entries:
+                entry_date = datetime.strptime(entry["date"], "%Y-%m-%d").date()
+                habit_data[entry_date] = entry["habit_types"]
+    except:
+        pass
+    
+    # Day names
+    day_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    
+    # Create calendar grid
+    st.markdown("---")
+    
+    # Header row
+    cols = st.columns(7)
+    for i, day_name in enumerate(day_names):
+        with cols[i]:
+            st.markdown(f"**{day_name}**")
+    
+    # Calendar rows
+    for week in cal:
+        cols = st.columns(7)
+        for i, day in enumerate(week):
+            with cols[i]:
+                if day == 0:
+                    st.write("")
+                else:
+                    day_date = date(month_date.year, month_date.month, day)
+                    is_today = day_date == date.today()
+                    is_current_month = True
+                    
+                    # Check if date is in current month
+                    if day_date.month != month_date.month:
+                        is_current_month = False
+                    
+                    # Get habits for this day
+                    habits = habit_data.get(day_date, [])
+                    
+                    # Display date
+                    if is_today:
+                        st.markdown(f"**{day}**")
+                    elif is_current_month:
+                        st.write(f"{day}")
+                    else:
+                        st.caption(f"{day}")
+                    
+                    # Display habit icons - one icon per habit
+                    if habits:
+                        icons = []
+                        for habit_type in habits:
+                            if "exercise" in habit_type:
+                                icons.append("🤸")
+                            elif "mindfulness" in habit_type:
+                                icons.append("🧘")
+                            elif "music" in habit_type:
+                                icons.append("🎵")
+                            else:
+                                icons.append("✓")
+                        
+                        if icons:
+                            st.write(" ".join(icons))
+
+
+def display_quarterly_calendar(quarter_date):
+    """Display a quarterly calendar (3 months)"""
+    quarter = (quarter_date.month - 1) // 3 + 1
+    start_month = (quarter - 1) * 3 + 1
+    year = quarter_date.year
+    
+    # Get habit data for the quarter
+    start_date = date(year, start_month, 1)
+    if quarter == 4:
+        end_date = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        end_date = date(year, start_month + 3, 1) - timedelta(days=1)
+    
+    habit_data = {}
+    try:
+        response = make_authenticated_request("GET", "/habits/calendar", params={
+            "start_date": str(start_date),
+            "end_date": str(end_date)
+        })
+        if response.status_code == 200:
+            entries = response.json()
+            for entry in entries:
+                entry_date = datetime.strptime(entry["date"], "%Y-%m-%d").date()
+                habit_data[entry_date] = entry["habit_types"]
+    except:
+        pass
+    
+    # Display 3 months side by side
+    months = []
+    for i in range(3):
+        month_num = start_month + i
+        if month_num > 12:
+            month_num -= 12
+            month_year = year + 1
+        else:
+            month_year = year
+        months.append((month_year, month_num))
+    
+    cols = st.columns(3)
+    for idx, (month_year, month_num) in enumerate(months):
+        with cols[idx]:
+            import calendar
+            month_name = calendar.month_name[month_num]
+            st.markdown(f"### {month_name} {month_year}")
+            
+            # Get calendar for this month
+            cal = calendar.monthcalendar(month_year, month_num)
+            day_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+            
+            # Header
+            header_cols = st.columns(7)
+            for i, day_name in enumerate(day_names):
+                with header_cols[i]:
+                    st.caption(day_name)
+            
+            # Calendar days
+            for week in cal:
+                week_cols = st.columns(7)
+                for i, day in enumerate(week):
+                    with week_cols[i]:
+                        if day == 0:
+                            st.write("")
+                        else:
+                            day_date = date(month_year, month_num, day)
+                            st.write(f"{day}")
+                            
+                            # Display habit icons - one icon per habit
+                            habits = habit_data.get(day_date, [])
+                            if habits:
+                                icons = []
+                                for habit_type in habits:
+                                    if "exercise" in habit_type:
+                                        icons.append("🤸")
+                                    elif "mindfulness" in habit_type:
+                                        icons.append("🧘")
+                                    elif "music" in habit_type:
+                                        icons.append("🎵")
+                                    else:
+                                        icons.append("✓")
+                                
+                                if icons:
+                                    st.caption(" ".join(icons))
+
+
+def display_yearly_calendar(year):
+    """Display a yearly calendar (all 12 months)"""
+    # Get habit data for the year
+    start_date = date(year, 1, 1)
+    end_date = date(year, 12, 31)
+    
+    habit_data = {}
+    try:
+        response = make_authenticated_request("GET", "/habits/calendar", params={
+            "start_date": str(start_date),
+            "end_date": str(end_date)
+        })
+        if response.status_code == 200:
+            entries = response.json()
+            for entry in entries:
+                entry_date = datetime.strptime(entry["date"], "%Y-%m-%d").date()
+                habit_data[entry_date] = entry["habit_types"]
+    except:
+        pass
+    
+    # Display months in a grid (3x4)
+    import calendar
+    months_per_row = 3
+    
+    for row in range(0, 12, months_per_row):
+        month_cols = st.columns(months_per_row)
+        for col_idx in range(months_per_row):
+            if row + col_idx < 12:
+                month_num = row + col_idx + 1
+                with month_cols[col_idx]:
+                    month_name = calendar.month_name[month_num]
+                    st.markdown(f"#### {month_name}")
+                    
+                    # Get calendar for this month
+                    cal = calendar.monthcalendar(year, month_num)
+                    day_names = ["S", "M", "T", "W", "T", "F", "S"]
+                    
+                    # Header
+                    header_cols = st.columns(7)
+                    for i, day_name in enumerate(day_names):
+                        with header_cols[i]:
+                            st.caption(day_name)
+                    
+                    # Calendar days (compact)
+                    for week in cal:
+                        week_cols = st.columns(7)
+                        for i, day in enumerate(week):
+                            with week_cols[i]:
+                                if day == 0:
+                                    st.write("")
+                                else:
+                                    day_date = date(year, month_num, day)
+                                    # Show date with icon if habits exist
+                                    habits = habit_data.get(day_date, [])
+                                    if habits:
+                                        icons = []
+                                        for habit_type in habits:
+                                            if "exercise" in habit_type:
+                                                icons.append("🤸")
+                                            elif "mindfulness" in habit_type:
+                                                icons.append("🧘")
+                                            elif "music" in habit_type:
+                                                icons.append("🎵")
+                                            else:
+                                                icons.append("✓")
+                                        
+                                        if icons:
+                                            st.caption(f"{day} {' '.join(icons)}")
+                                        else:
+                                            st.caption(f"{day}")
+                                    else:
+                                        st.caption(f"{day}")
+
+
+def habit_analytics_tab():
+    """Analytics page for habit tracking with charts and visualizations"""
+    st.title("📊 Habit Analytics")
+    st.markdown("---")
+    
+    # Time frame selection
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        time_frame = st.selectbox(
+            "Time Frame",
+            ["This Month", "This Quarter", "This Year", "Last Month", "Last Quarter", "Last Year", "Custom"],
+            key="habit_analytics_timeframe"
+        )
+    
+    # Calculate date range based on selection
+    today = date.today()
+    start_date = None
+    end_date = None
+    
+    if time_frame == "This Month":
+        start_date = date(today.year, today.month, 1)
+        if today.month == 12:
+            end_date = date(today.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            end_date = date(today.year, today.month + 1, 1) - timedelta(days=1)
+    elif time_frame == "This Quarter":
+        quarter = (today.month - 1) // 3 + 1
+        start_month = (quarter - 1) * 3 + 1
+        start_date = date(today.year, start_month, 1)
+        if quarter == 4:
+            end_date = date(today.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            end_date = date(today.year, start_month + 3, 1) - timedelta(days=1)
+    elif time_frame == "This Year":
+        start_date = date(today.year, 1, 1)
+        end_date = date(today.year, 12, 31)
+    elif time_frame == "Last Month":
+        if today.month == 1:
+            start_date = date(today.year - 1, 12, 1)
+            end_date = date(today.year - 1, 12, 31)
+        else:
+            start_date = date(today.year, today.month - 1, 1)
+            end_date = date(today.year, today.month, 1) - timedelta(days=1)
+    elif time_frame == "Last Quarter":
+        quarter = (today.month - 1) // 3 + 1
+        if quarter == 1:
+            start_month = 10
+            year = today.year - 1
+        else:
+            start_month = (quarter - 2) * 3 + 1
+            year = today.year
+        start_date = date(year, start_month, 1)
+        if start_month == 10:
+            end_date = date(year, 12, 31)
+        else:
+            end_date = date(year, start_month + 3, 1) - timedelta(days=1)
+    elif time_frame == "Last Year":
+        start_date = date(today.year - 1, 1, 1)
+        end_date = date(today.year - 1, 12, 31)
+    elif time_frame == "Custom":
+        with col2:
+            start_date = st.date_input("Start Date", value=today - timedelta(days=30), key="custom_start")
+            end_date = st.date_input("End Date", value=today, key="custom_end")
+    
+    # Fetch analytics data
+    try:
+        params = {}
+        if start_date:
+            params["start_date"] = str(start_date)
+        if end_date:
+            params["end_date"] = str(end_date)
+        
+        response = make_authenticated_request("GET", "/habits/analytics/summary", params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Display time frame info
+            if start_date and end_date:
+                st.info(f"📅 Showing data from {start_date.strftime('%B %d, %Y')} to {end_date.strftime('%B %d, %Y')}")
+            
+            # Key Metrics
+            st.markdown("### 📈 Key Metrics")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Days with Habits", data.get("total_days_with_habits", 0))
+            with col2:
+                st.metric("Total Exercise Sessions", data.get("exercise", {}).get("total_sessions", 0))
+            with col3:
+                st.metric("Total Mindfulness Sessions", data.get("mindfulness", {}).get("total_sessions", 0))
+            with col4:
+                st.metric("Total Music Sessions", data.get("music", {}).get("total_sessions", 0))
+            
+            st.markdown("---")
+            
+            # Exercise Analytics
+            st.markdown("### 🏋️ Exercise Analytics")
+            exercise_data = data.get("exercise", {})
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Minutes", f"{exercise_data.get('total_minutes', 0):.0f}")
+            with col2:
+                st.metric("Total Distance", f"{exercise_data.get('total_distance_miles', 0):.2f} mi")
+            with col3:
+                st.metric("Total Elevation", f"{exercise_data.get('total_elevation_feet', 0):.0f} ft")
+            with col4:
+                avg_minutes = exercise_data.get('total_minutes', 0) / exercise_data.get('total_sessions', 1) if exercise_data.get('total_sessions', 0) > 0 else 0
+                st.metric("Avg Minutes/Session", f"{avg_minutes:.1f}")
+            
+            # Exercise breakdown by type
+            if exercise_data.get('total_sessions', 0) > 0:
+                st.markdown("#### Exercise Breakdown")
+                exercise_types = {
+                    "Workout": exercise_data.get('workout_sessions', 0),
+                    "Yoga": exercise_data.get('yoga_sessions', 0),
+                    "Running": exercise_data.get('running_sessions', 0),
+                    "Biking": exercise_data.get('biking_sessions', 0)
+                }
+                
+                # Filter out zero values
+                exercise_types = {k: v for k, v in exercise_types.items() if v > 0}
+                
+                if exercise_types:
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        # Bar chart
+                        try:
+                            import pandas as pd
+                            df_exercise = pd.DataFrame(list(exercise_types.items()), columns=["Type", "Sessions"])
+                            st.bar_chart(df_exercise.set_index("Type"))
+                        except ImportError:
+                            # Fallback if pandas not available
+                            st.write("**Exercise Sessions by Type:**")
+                            for ex_type, count in exercise_types.items():
+                                st.write(f"- {ex_type}: {count}")
+                    with col2:
+                        # Pie chart using plotly if available, otherwise show data
+                        try:
+                            import plotly.express as px
+                            fig = px.pie(
+                                values=list(exercise_types.values()),
+                                names=list(exercise_types.keys()),
+                                title="Exercise Sessions by Type"
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                        except:
+                            try:
+                                import pandas as pd
+                                df_exercise = pd.DataFrame(list(exercise_types.items()), columns=["Type", "Sessions"])
+                                st.dataframe(df_exercise, use_container_width=True)
+                            except:
+                                st.write("**Exercise Sessions:**")
+                                for ex_type, count in exercise_types.items():
+                                    st.write(f"- {ex_type}: {count}")
+            
+            st.markdown("---")
+            
+            # Mindfulness Analytics
+            st.markdown("### 🧠 Mindfulness Analytics")
+            mindfulness_data = data.get("mindfulness", {})
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Total Minutes", f"{mindfulness_data.get('total_minutes', 0):.0f}")
+            with col2:
+                avg_minutes = mindfulness_data.get('total_minutes', 0) / mindfulness_data.get('total_sessions', 1) if mindfulness_data.get('total_sessions', 0) > 0 else 0
+                st.metric("Avg Minutes/Session", f"{avg_minutes:.1f}")
+            
+            st.markdown("---")
+            
+            # Music Analytics
+            st.markdown("### 🎵 Music Practice Analytics")
+            music_data = data.get("music", {})
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Minutes", f"{music_data.get('total_minutes', 0):.0f}")
+            with col2:
+                avg_minutes = music_data.get('total_minutes', 0) / music_data.get('total_sessions', 1) if music_data.get('total_sessions', 0) > 0 else 0
+                st.metric("Avg Minutes/Session", f"{avg_minutes:.1f}")
+            with col3:
+                st.metric("Guitar Sessions", music_data.get('guitar_sessions', 0))
+            
+            if music_data.get('total_sessions', 0) > 0:
+                music_types = {
+                    "Guitar": music_data.get('guitar_sessions', 0),
+                    "Drums": music_data.get('drums_sessions', 0)
+                }
+                music_types = {k: v for k, v in music_types.items() if v > 0}
+                
+                if music_types:
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        try:
+                            import pandas as pd
+                            df_music = pd.DataFrame(list(music_types.items()), columns=["Type", "Sessions"])
+                            st.bar_chart(df_music.set_index("Type"))
+                        except ImportError:
+                            st.write("**Music Practice by Type:**")
+                            for music_type, count in music_types.items():
+                                st.write(f"- {music_type}: {count}")
+                    with col2:
+                        try:
+                            import plotly.express as px
+                            fig = px.pie(
+                                values=list(music_types.values()),
+                                names=list(music_types.keys()),
+                                title="Music Practice by Type"
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                        except:
+                            try:
+                                import pandas as pd
+                                df_music = pd.DataFrame(list(music_types.items()), columns=["Type", "Sessions"])
+                                st.dataframe(df_music, use_container_width=True)
+                            except:
+                                st.write("**Music Practice:**")
+                                for music_type, count in music_types.items():
+                                    st.write(f"- {music_type}: {count}")
+            
+            st.markdown("---")
+            
+            # Daily Activity Trends
+            st.markdown("### 📊 Daily Activity Trends")
+            daily_data = data.get("daily_breakdown", [])
+            
+            if daily_data:
+                try:
+                    import pandas as pd
+                    df_daily = pd.DataFrame(daily_data)
+                    df_daily['date'] = pd.to_datetime(df_daily['date'])
+                    df_daily = df_daily.sort_values('date')
+                    
+                    # Line chart for daily minutes
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("#### Daily Total Minutes")
+                        st.line_chart(df_daily.set_index('date')['total_minutes'])
+                    
+                    with col2:
+                        st.markdown("#### Daily Habit Counts")
+                        df_counts = df_daily[['date', 'exercise_count', 'mindfulness_count', 'music_count']].set_index('date')
+                        st.line_chart(df_counts)
+                    
+                    # Activity heatmap (simplified as bar chart by day of week)
+                    st.markdown("#### Activity by Day of Week")
+                    df_daily['day_of_week'] = df_daily['date'].dt.day_name()
+                    df_daily['day_of_week_num'] = df_daily['date'].dt.dayofweek
+                    
+                    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                    df_weekly = df_daily.groupby('day_of_week').agg({
+                        'exercise_count': 'sum',
+                        'mindfulness_count': 'sum',
+                        'music_count': 'sum',
+                        'total_minutes': 'mean'
+                    }).reindex([d for d in day_order if d in df_daily['day_of_week'].values])
+                    
+                    st.bar_chart(df_weekly[['exercise_count', 'mindfulness_count', 'music_count']])
+                except ImportError:
+                    st.info("Pandas is required for daily trends visualization. Install with: pip install pandas")
+                    st.json(daily_data)
+            
+            # Habit Type Distribution
+            st.markdown("---")
+            st.markdown("### 📋 Habit Type Distribution")
+            habit_counts = data.get("habit_type_counts", {})
+            
+            if habit_counts:
+                # Clean up habit type names for display
+                display_names = {}
+                for habit_type, count in habit_counts.items():
+                    # Convert "exercise_workout" to "Exercise: Workout"
+                    parts = habit_type.split('_')
+                    category = parts[0].capitalize()
+                    activity = ' '.join(word.capitalize() for word in parts[1:])
+                    display_name = f"{category}: {activity}"
+                    display_names[display_name] = count
+                
+                try:
+                    import pandas as pd
+                    df_habits = pd.DataFrame(list(display_names.items()), columns=["Habit Type", "Count"])
+                    df_habits = df_habits.sort_values('Count', ascending=False)
+                    
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        st.bar_chart(df_habits.set_index("Habit Type"))
+                    with col2:
+                        st.dataframe(df_habits, use_container_width=True)
+                except ImportError:
+                    st.write("**Habit Type Distribution:**")
+                    sorted_habits = sorted(display_names.items(), key=lambda x: x[1], reverse=True)
+                    for habit_name, count in sorted_habits:
+                        st.write(f"- {habit_name}: {count}")
+        else:
+            st.error(f"Failed to load analytics: {response.text}")
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot connect to API. Make sure the backend is running.")
+    except Exception as e:
+        st.error(f"Error loading analytics: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
 
 
 # Main app logic

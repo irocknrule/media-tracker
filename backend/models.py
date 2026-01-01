@@ -86,3 +86,15 @@ class Music(Base):
     thumbnail_url = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
+class HabitLog(Base):
+    __tablename__ = "habit_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, index=True)
+    habit_type = Column(String, nullable=False, index=True)  # e.g., "exercise_workout", "mindfulness_meditation"
+    metric_name = Column(String, nullable=False)  # e.g., "minutes", "distance", "elevation"
+    value = Column(Float, nullable=False)  # The numeric value
+    unit = Column(String, nullable=False)  # e.g., "min", "mi", "ft"
+    created_at = Column(DateTime, default=datetime.utcnow)
+
