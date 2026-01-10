@@ -31,7 +31,7 @@ def init_db():
     # Run migrations
     migrate_add_thumbnail_url()
     migrate_add_habits()
-    migrate_add_habits()
+    migrate_add_portfolio()
     
     db = SessionLocal()
     try:
@@ -173,9 +173,16 @@ def migrate_add_habits():
     run_migration()
 
 
+def migrate_add_portfolio():
+    """Migration: Create portfolio_transactions table"""
+    # Import here to avoid circular imports
+    from migrate_add_portfolio import migrate_add_portfolio as run_migration
+    run_migration()
+
+
 if __name__ == "__main__":
     init_db()
     migrate_add_thumbnail_url()
     migrate_add_habits()
-    migrate_add_habits()
+    migrate_add_portfolio()
 

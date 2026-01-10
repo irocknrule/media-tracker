@@ -5,9 +5,13 @@ from typing import Optional
 from collections import defaultdict
 import json
 import base64
+import os
 
 # Configuration
-API_BASE_URL = "http://localhost:8000"
+# Use environment variable if set, otherwise default to localhost
+# For Docker: set API_BASE_URL=http://backend:8000 (internal Docker network)
+# For external access: set API_BASE_URL=http://<host-ip>:8000
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 # Page configuration
 st.set_page_config(
@@ -156,11 +160,209 @@ def display_search_results(results: list, key_prefix: str):
     return selected_result
 
 
+def get_query_params():
+    """Get query parameters with compatibility for old and new Streamlit versions"""
+    try:
+        # Try old experimental API (Streamlit < 1.30.0)
+        if hasattr(st, 'experimental_get_query_params'):
+            return st.experimental_get_query_params()
+    except:
+        pass
+    
+    try:
+        # Try new API (Streamlit 1.30.0+)
+        if hasattr(st, 'query_params'):
+            return st.query_params
+    except:
+        pass
+    
+    # Return empty dict-like object if neither works
+    class EmptyQueryParams:
+        def __getitem__(self, key):
+            raise KeyError(key)
+        def __contains__(self, key):
+            return False
+        def to_dict(self):
+            return {}
+        def update(self, **kwargs):
+            pass
+    
+    return EmptyQueryParams()
+
+
+def initialize_state_from_query_params():
+    """Initialize session state from query parameters to persist state across refreshes
+    Query params always take precedence - they represent the "source of truth" for refresh scenarios"""
+    query_params = get_query_params()
+    
+    # Check if query params exist - if they do, use them (this handles page refresh)
+    has_query_params = False
+    try:
+        if "category" in query_params or "page" in query_params:
+            has_query_params = True
+    except:
+        pass
+    
+    # Initialize category - query params take precedence
+    if "category" in query_params:
+        category = query_params["category"]
+        # Handle list values from old API
+        if isinstance(category, list) and len(category) > 0:
+            category = category[0]
+        valid_categories = ["Media Tracker", "Habit Tracker", "Portfolio Tracker"]
+        if category in valid_categories:
+            st.session_state["selected_category"] = category
+        else:
+            # Invalid category in query params, use default
+            if "selected_category" not in st.session_state:
+                st.session_state["selected_category"] = "Media Tracker"
+    elif "selected_category" not in st.session_state:
+        # No query param and no session state - use default
+        st.session_state["selected_category"] = "Media Tracker"
+    
+    # Initialize page - query params take precedence
+    if "page" in query_params:
+        page = query_params["page"]
+        # Handle list values from old API
+        if isinstance(page, list) and len(page) > 0:
+            page = page[0]
+        category = st.session_state["selected_category"]
+        
+        # Validate page against category
+        if category == "Media Tracker":
+            valid_pages = ["Movies", "TV Shows", "Books", "Music", "Manual Entry", "Analytics"]
+            if page in valid_pages:
+                st.session_state["selected_page"] = page
+            else:
+                # Invalid page for category, use default
+                if "selected_page" not in st.session_state:
+                    st.session_state["selected_page"] = "Movies"
+        elif category == "Habit Tracker":
+            valid_pages = ["Log Habits", "Calendar", "Analytics"]
+            if page in valid_pages:
+                st.session_state["selected_page"] = page
+            else:
+                if "selected_page" not in st.session_state:
+                    st.session_state["selected_page"] = "Log Habits"
+        else:  # Portfolio Tracker
+            valid_pages = ["Overview", "Transactions", "Upload Data", "Individual Holdings"]
+            if page in valid_pages:
+                st.session_state["selected_page"] = page
+            else:
+                if "selected_page" not in st.session_state:
+                    st.session_state["selected_page"] = "Overview"
+    elif "selected_page" not in st.session_state:
+        # No query param and no session state - set default based on category
+        category = st.session_state["selected_category"]
+        if category == "Media Tracker":
+            st.session_state["selected_page"] = "Movies"
+        elif category == "Habit Tracker":
+            st.session_state["selected_page"] = "Log Habits"
+        else:
+            st.session_state["selected_page"] = "Overview"
+
+
+def update_query_params(category: str = None, page: str = None, **filters):
+    """Update query parameters to persist state - returns True if update was needed"""
+    params = {}
+    
+    # Always include category - use passed value, then session state, then query params
+    if category:
+        params["category"] = category
+    elif "selected_category" in st.session_state:
+        params["category"] = st.session_state["selected_category"]
+    else:
+        # Try to get from current query params
+        try:
+            query_params = get_query_params()
+            if "category" in query_params:
+                cat = query_params["category"]
+                if isinstance(cat, list) and len(cat) > 0:
+                    cat = cat[0]
+                params["category"] = cat
+        except:
+            pass
+    
+    # Always include page - use passed value, then session state, then query params
+    if page:
+        params["page"] = page
+    elif "selected_page" in st.session_state:
+        params["page"] = st.session_state["selected_page"]
+    else:
+        # Try to get from current query params
+        try:
+            query_params = get_query_params()
+            if "page" in query_params:
+                pg = query_params["page"]
+                if isinstance(pg, list) and len(pg) > 0:
+                    pg = pg[0]
+                params["page"] = pg
+        except:
+            pass
+    
+    # Add filter parameters
+    for key, value in filters.items():
+        if value is not None and value != "All":
+            params[key] = str(value)
+    
+    # Debug: Show what we're trying to set
+    # st.write(f"DEBUG: Setting query params: {params}")
+    
+    # Try experimental API first (Streamlit < 1.30.0)
+    try:
+        if hasattr(st, 'experimental_set_query_params'):
+            st.experimental_set_query_params(**params)
+            return True
+    except Exception as e:
+        pass
+    
+    # Try new API (Streamlit 1.30.0+)
+    try:
+        if hasattr(st, 'query_params'):
+            # Set each parameter individually for better reliability
+            for key, value in params.items():
+                st.query_params[key] = value
+            return True
+    except Exception as e:
+        pass
+    
+    # If query params aren't available, just store in session state
+    return False
+
+
+def get_filter_from_query_params(filter_key: str, default_value=None):
+    """Get filter value from query parameters"""
+    query_params = get_query_params()
+    try:
+        if filter_key in query_params:
+            value = query_params[filter_key]
+            # Handle both single values and lists (old API returns lists)
+            if isinstance(value, list) and len(value) > 0:
+                value = value[0]
+            # Try to convert to int if it's a number
+            try:
+                return int(value)
+            except ValueError:
+                return value
+    except (KeyError, TypeError):
+        pass
+    return default_value
+
+
 def main_app():
     """Main application"""
-    # Use session state to track selected category
-    if "selected_category" not in st.session_state:
-        st.session_state["selected_category"] = "Media Tracker"
+    # Initialize state from query parameters (persists across refreshes)
+    initialize_state_from_query_params()
+    
+    # Ensure query params are set to match current state (for first load scenario)
+    # This ensures that even on first load, the URL has query params that persist on refresh
+    try:
+        query_params = get_query_params()
+        if "category" not in query_params or "page" not in query_params:
+            # Query params missing - sync them with current session state
+            update_query_params()
+    except:
+        pass
     
     # Top-level category selection - styled as tabs
     st.markdown("""
@@ -181,20 +383,39 @@ def main_app():
         </style>
     """, unsafe_allow_html=True)
     
+    # Define callbacks for category buttons
+    def switch_to_media_tracker():
+        st.session_state["selected_category"] = "Media Tracker"
+        st.session_state["selected_page"] = "Movies"
+        st.experimental_set_query_params(category="Media Tracker", page="Movies")
+    
+    def switch_to_habit_tracker():
+        st.session_state["selected_category"] = "Habit Tracker"
+        st.session_state["selected_page"] = "Log Habits"
+        st.experimental_set_query_params(category="Habit Tracker", page="Log Habits")
+    
+    def switch_to_portfolio_tracker():
+        st.session_state["selected_category"] = "Portfolio Tracker"
+        st.session_state["selected_page"] = "Overview"
+        st.experimental_set_query_params(category="Portfolio Tracker", page="Overview")
+    
     # Top-level tabs using columns for better layout
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("📚 Media Tracker", use_container_width=True, 
-                     type="primary" if st.session_state["selected_category"] == "Media Tracker" else "secondary", 
-                     key="btn_media_tracker"):
-            st.session_state["selected_category"] = "Media Tracker"
-            st.rerun()
+        st.button("📚 Media Tracker", use_container_width=True, 
+                  type="primary" if st.session_state["selected_category"] == "Media Tracker" else "secondary", 
+                  key="btn_media_tracker",
+                  on_click=switch_to_media_tracker)
     with col2:
-        if st.button("📅 Habit Tracker", use_container_width=True, 
-                     type="primary" if st.session_state["selected_category"] == "Habit Tracker" else "secondary", 
-                     key="btn_habit_tracker"):
-            st.session_state["selected_category"] = "Habit Tracker"
-            st.rerun()
+        st.button("📅 Habit Tracker", use_container_width=True, 
+                  type="primary" if st.session_state["selected_category"] == "Habit Tracker" else "secondary", 
+                  key="btn_habit_tracker",
+                  on_click=switch_to_habit_tracker)
+    with col3:
+        st.button("💼 Portfolio Tracker", use_container_width=True, 
+                  type="primary" if st.session_state["selected_category"] == "Portfolio Tracker" else "secondary", 
+                  key="btn_portfolio_tracker",
+                  on_click=switch_to_portfolio_tracker)
     
     st.markdown("---")
     
@@ -207,41 +428,101 @@ def main_app():
         if st.session_state["selected_category"] == "Media Tracker":
             st.markdown("### 📚 Media Tracker")
             st.markdown("---")
+            # Get current page from session state
+            current_page = st.session_state.get("selected_page", "Movies")
+            page_options = ["Movies", "TV Shows", "Books", "Music", "Manual Entry", "Analytics"]
+            default_index = page_options.index(current_page) if current_page in page_options else 0
+            
             page = st.radio(
                 "Select Option",
-                ["Movies", "TV Shows", "Books", "Music", "Manual Entry", "Analytics"],
-                label_visibility="collapsed"
+                page_options,
+                index=default_index,
+                label_visibility="collapsed",
+                key="media_tracker_page_radio"
             )
-        else:  # Habit Tracker
+            
+            # Always check and update if page changed
+            if page != current_page:
+                st.session_state["selected_page"] = page
+                # Update query params with both category and page
+                st.experimental_set_query_params(
+                    category=st.session_state["selected_category"],
+                    page=page
+                )
+        elif st.session_state["selected_category"] == "Habit Tracker":
             st.markdown("### 📅 Habit Tracker")
             st.markdown("---")
+            current_page = st.session_state.get("selected_page", "Log Habits")
+            page_options = ["Log Habits", "Calendar", "Analytics"]
+            default_index = page_options.index(current_page) if current_page in page_options else 0
+            
             page = st.radio(
                 "Select Option",
-                ["Log Habits", "Calendar", "Analytics"],
-                label_visibility="collapsed"
+                page_options,
+                index=default_index,
+                label_visibility="collapsed",
+                key="habit_tracker_page_radio"
             )
+            
+            if page != current_page:
+                st.session_state["selected_page"] = page
+                st.experimental_set_query_params(
+                    category=st.session_state["selected_category"],
+                    page=page
+                )
+        else:  # Portfolio Tracker
+            st.markdown("### 💼 Portfolio Tracker")
+            st.markdown("---")
+            current_page = st.session_state.get("selected_page", "Overview")
+            page_options = ["Overview", "Transactions", "Upload Data", "Individual Holdings"]
+            default_index = page_options.index(current_page) if current_page in page_options else 0
+            
+            page = st.radio(
+                "Select Option",
+                page_options,
+                index=default_index,
+                label_visibility="collapsed",
+                key="portfolio_tracker_page_radio"
+            )
+            
+            if page != current_page:
+                st.session_state["selected_page"] = page
+                st.experimental_set_query_params(
+                    category=st.session_state["selected_category"],
+                    page=page
+                )
     
-    # Main content routing
+    # Main content routing - use persisted page from session state
+    current_page = st.session_state.get("selected_page", page)
     if st.session_state["selected_category"] == "Media Tracker":
-        if page == "Movies":
+        if current_page == "Movies":
             movies_page()
-        elif page == "TV Shows":
+        elif current_page == "TV Shows":
             tv_shows_page()
-        elif page == "Books":
+        elif current_page == "Books":
             books_page()
-        elif page == "Music":
+        elif current_page == "Music":
             music_page()
-        elif page == "Manual Entry":
+        elif current_page == "Manual Entry":
             manual_entry_page()
-        elif page == "Analytics":
+        elif current_page == "Analytics":
             analytics_page()
-    else:  # Habit Tracker
-        if page == "Log Habits":
+    elif st.session_state["selected_category"] == "Habit Tracker":
+        if current_page == "Log Habits":
             log_habits_tab()
-        elif page == "Calendar":
+        elif current_page == "Calendar":
             calendar_tab()
-        elif page == "Analytics":
+        elif current_page == "Analytics":
             habit_analytics_tab()
+    else:  # Portfolio Tracker
+        if current_page == "Overview":
+            portfolio_overview_page()
+        elif current_page == "Transactions":
+            portfolio_transactions_page()
+        elif current_page == "Upload Data":
+            portfolio_upload_page()
+        elif current_page == "Individual Holdings":
+            portfolio_individual_holdings_page()
 
 
 def movies_page():
@@ -253,7 +534,18 @@ def movies_page():
     
     with tab1:
         st.subheader("Your Movies")
-        year_filter = st.selectbox("Filter by Year", ["All"] + list(range(2020, date.today().year + 2)), key="movie_year")
+        # Get persisted year filter from query params
+        year_options = ["All"] + list(range(2020, date.today().year + 2))
+        persisted_year = get_filter_from_query_params("movie_year", "All")
+        if persisted_year not in year_options:
+            persisted_year = "All"
+        default_index = year_options.index(persisted_year) if persisted_year in year_options else 0
+        
+        year_filter = st.selectbox("Filter by Year", year_options, index=default_index, key="movie_year")
+        
+        # Update query params when filter changes
+        if year_filter != persisted_year:
+            update_query_params(movie_year=year_filter)
         
         try:
             params = {}
@@ -429,7 +721,18 @@ def tv_shows_page():
     
     with tab1:
         st.subheader("Your TV Shows")
-        year_filter = st.selectbox("Filter by Year", ["All"] + list(range(2020, date.today().year + 2)), key="tv_year")
+        # Get persisted year filter from query params
+        year_options = ["All"] + list(range(2020, date.today().year + 2))
+        persisted_year = get_filter_from_query_params("tv_year", "All")
+        if persisted_year not in year_options:
+            persisted_year = "All"
+        default_index = year_options.index(persisted_year) if persisted_year in year_options else 0
+        
+        year_filter = st.selectbox("Filter by Year", year_options, index=default_index, key="tv_year")
+        
+        # Update query params when filter changes
+        if year_filter != persisted_year:
+            update_query_params(tv_year=year_filter)
         
         try:
             params = {}
@@ -841,7 +1144,18 @@ def books_page():
     
     with tab1:
         st.subheader("Your Books")
-        year_filter = st.selectbox("Filter by Year", ["All"] + list(range(2020, date.today().year + 2)), key="book_year")
+        # Get persisted year filter from query params
+        year_options = ["All"] + list(range(2020, date.today().year + 2))
+        persisted_year = get_filter_from_query_params("book_year", "All")
+        if persisted_year not in year_options:
+            persisted_year = "All"
+        default_index = year_options.index(persisted_year) if persisted_year in year_options else 0
+        
+        year_filter = st.selectbox("Filter by Year", year_options, index=default_index, key="book_year")
+        
+        # Update query params when filter changes
+        if year_filter != persisted_year:
+            update_query_params(book_year=year_filter)
         
         try:
             params = {}
@@ -1015,7 +1329,18 @@ def music_page():
     
     with tab1:
         st.subheader("Your Music")
-        year_filter = st.selectbox("Filter by Year", ["All"] + list(range(2020, date.today().year + 2)), key="music_year")
+        # Get persisted year filter from query params
+        year_options = ["All"] + list(range(2020, date.today().year + 2))
+        persisted_year = get_filter_from_query_params("music_year", "All")
+        if persisted_year not in year_options:
+            persisted_year = "All"
+        default_index = year_options.index(persisted_year) if persisted_year in year_options else 0
+        
+        year_filter = st.selectbox("Filter by Year", year_options, index=default_index, key="music_year")
+        
+        # Update query params when filter changes
+        if year_filter != persisted_year:
+            update_query_params(music_year=year_filter)
         
         try:
             params = {}
@@ -1590,12 +1915,35 @@ def analytics_page():
             # Sidebar controls
             with st.sidebar:
                 st.markdown("### Analytics Filters")
-                selected_year = st.selectbox("Select Year", available_years, key="analytics_year")
+                # Get persisted year from query params
+                persisted_year = get_filter_from_query_params("analytics_year", available_years[0] if available_years else None)
+                if persisted_year not in available_years:
+                    persisted_year = available_years[0] if available_years else None
+                default_year_index = available_years.index(persisted_year) if persisted_year and persisted_year in available_years else 0
+                
+                selected_year = st.selectbox("Select Year", available_years, index=default_year_index, key="analytics_year")
+                
+                # Update query params when year changes
+                if selected_year != persisted_year:
+                    update_query_params(analytics_year=selected_year)
+                
+                # Get persisted media type from query params
+                media_type_options = ["Movies", "TV Shows", "Books", "Music"]
+                persisted_media_type = get_filter_from_query_params("analytics_media_type", "Movies")
+                if persisted_media_type not in media_type_options:
+                    persisted_media_type = "Movies"
+                default_media_index = media_type_options.index(persisted_media_type) if persisted_media_type in media_type_options else 0
+                
                 media_type = st.selectbox(
                     "Select Media Type",
-                    ["Movies", "TV Shows", "Books", "Music"],
+                    media_type_options,
+                    index=default_media_index,
                     key="analytics_media_type"
                 )
+                
+                # Update query params when media type changes
+                if media_type != persisted_media_type:
+                    update_query_params(analytics_media_type=media_type)
                 st.markdown("---")
                 
                 # Year Summary in sidebar
@@ -2099,8 +2447,18 @@ def calendar_tab():
     st.title("📅 Calendar View")
     st.markdown("---")
     
-    # View type selector
-    view_type = st.radio("View", ["Monthly", "Quarterly", "Yearly"], horizontal=True, key="calendar_view")
+    # View type selector - get persisted value from query params
+    view_options = ["Monthly", "Quarterly", "Yearly"]
+    persisted_view = get_filter_from_query_params("calendar_view", "Monthly")
+    if persisted_view not in view_options:
+        persisted_view = "Monthly"
+    default_index = view_options.index(persisted_view) if persisted_view in view_options else 0
+    
+    view_type = st.radio("View", view_options, index=default_index, horizontal=True, key="calendar_view")
+    
+    # Update query params when view changes
+    if view_type != persisted_view:
+        update_query_params(calendar_view=view_type)
     
     # Get current date
     today = date.today()
@@ -2746,6 +3104,1297 @@ def habit_analytics_tab():
         st.error("Cannot connect to API. Make sure the backend is running.")
     except Exception as e:
         st.error(f"Error loading analytics: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+
+
+def portfolio_overview_page():
+    """Portfolio overview page showing summary and all holdings"""
+    st.title("💼 Portfolio Overview")
+    st.markdown("---")
+    
+    try:
+        # Get portfolio summary
+        response = make_authenticated_request("GET", "/portfolio/summary")
+        if response.status_code == 200:
+            summary = response.json()
+            
+            # Display overall metrics
+            st.markdown("### 📊 Portfolio Summary")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    "Total Invested",
+                    f"${summary['total_invested']:,.2f}"
+                )
+            
+            with col2:
+                if summary.get('current_value') is not None:
+                    st.metric(
+                        "Current Value",
+                        f"${summary['current_value']:,.2f}"
+                    )
+                else:
+                    st.metric(
+                        "Current Value",
+                        "N/A",
+                        help="Current prices not available"
+                    )
+            
+            with col3:
+                if summary.get('total_profit_loss') is not None:
+                    st.metric(
+                        "Total P/L",
+                        f"${summary['total_profit_loss']:,.2f}",
+                        delta=f"{summary['total_profit_loss_percentage']:.2f}%"
+                    )
+                else:
+                    st.metric(
+                        "Total P/L",
+                        "N/A",
+                        help="Current prices not available"
+                    )
+            
+            with col4:
+                st.metric(
+                    "# Holdings",
+                    len(summary['holdings'])
+                )
+            
+            st.markdown("---")
+            
+            # Display holdings table
+            st.markdown("### 📈 Current Holdings")
+            
+            if summary['holdings']:
+                holdings = summary['holdings']
+                
+                # Create a display table
+                holdings_data = []
+                for holding in holdings:
+                    holdings_data.append({
+                        "Ticker": holding['ticker'],
+                        "Type": holding['asset_type'],
+                        "Quantity": f"{holding['total_quantity']:.2f}",
+                        "Avg Cost": f"${holding['average_cost']:.2f}",
+                        "Invested": f"${holding['total_invested']:,.2f}",
+                        "Current Price": f"${holding['current_price']:.2f}" if holding.get('current_price') else "N/A",
+                        "Current Value": f"${holding['current_value']:,.2f}" if holding.get('current_value') else "N/A",
+                        "P/L": f"${holding['profit_loss']:,.2f}" if holding.get('profit_loss') else "N/A",
+                        "P/L %": f"{holding['profit_loss_percentage']:.2f}%" if holding.get('profit_loss_percentage') else "N/A"
+                    })
+                
+                # Display as dataframe
+                try:
+                    import pandas as pd
+                    df = pd.DataFrame(holdings_data)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                except ImportError:
+                    # Fallback to simple table
+                    for data in holdings_data:
+                        with st.expander(f"{data['Ticker']} - {data['Type']}"):
+                            for key, value in data.items():
+                                if key not in ['Ticker', 'Type']:
+                                    st.write(f"**{key}:** {value}")
+                
+                # Pie chart of holdings by value
+                st.markdown("### 📊 Holdings Distribution")
+                
+                try:
+                    import plotly.graph_objects as go
+                    
+                    # Create pie chart for invested amounts
+                    labels = [h['ticker'] for h in holdings]
+                    values = [h['total_invested'] for h in holdings]
+                    
+                    fig = go.Figure(data=[go.Pie(
+                        labels=labels,
+                        values=values,
+                        hole=0.3
+                    )])
+                    fig.update_layout(title_text="Portfolio Allocation by Investment")
+                    st.plotly_chart(fig, use_container_width=True)
+                except ImportError:
+                    st.info("Install plotly for visualization: pip install plotly")
+            else:
+                st.info("No holdings found. Add transactions to see your portfolio.")
+        
+        else:
+            st.error(f"Failed to load portfolio summary: {response.text}")
+    
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot connect to API. Make sure the backend is running.")
+    except Exception as e:
+        st.error(f"Error loading portfolio: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+
+
+def portfolio_transactions_page():
+    """View and manage portfolio transactions"""
+    st.title("📝 Transactions")
+    st.markdown("---")
+    
+    tab1, tab2 = st.tabs(["View Transactions", "Add Transaction"])
+    
+    with tab1:
+        st.subheader("All Transactions")
+        
+        # Filters
+        col1, col2 = st.columns(2)
+        with col1:
+            ticker_filter = st.text_input("Filter by Ticker (optional)", "").upper()
+        with col2:
+            asset_type_filter = st.selectbox(
+                "Filter by Asset Type",
+                ["All", "STOCK", "ETF", "MUTUAL_FUND"]
+            )
+        
+        try:
+            params = {}
+            if ticker_filter:
+                params["ticker"] = ticker_filter
+            if asset_type_filter != "All":
+                params["asset_type"] = asset_type_filter
+            
+            response = make_authenticated_request("GET", "/portfolio/transactions", params=params)
+            if response.status_code == 200:
+                transactions = response.json()
+                
+                if transactions:
+                    # Display transactions
+                    for txn in transactions:
+                        with st.expander(
+                            f"{txn['ticker']} - {txn['transaction_type']} - {txn['transaction_date']} - ${txn['total_amount']:,.2f}"
+                        ):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.write(f"**Ticker:** {txn['ticker']}")
+                                st.write(f"**Type:** {txn['transaction_type']}")
+                                st.write(f"**Asset Type:** {txn['asset_type']}")
+                                st.write(f"**Date:** {txn['transaction_date']}")
+                            with col2:
+                                st.write(f"**Quantity:** {txn['quantity']:.2f}")
+                                st.write(f"**Price/Unit:** ${txn['price_per_unit']:.2f}")
+                                st.write(f"**Total:** ${txn['total_amount']:,.2f}")
+                                st.write(f"**Fees:** ${txn['fees']:.2f}")
+                            
+                            if txn.get('notes'):
+                                st.write(f"**Notes:** {txn['notes']}")
+                            
+                            # Delete button
+                            if st.button("Delete", key=f"delete_txn_{txn['id']}"):
+                                try:
+                                    del_response = make_authenticated_request(
+                                        "DELETE",
+                                        f"/portfolio/transactions/{txn['id']}"
+                                    )
+                                    if del_response.status_code == 204:
+                                        st.success("Transaction deleted!")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Failed to delete: {del_response.text}")
+                                except Exception as e:
+                                    st.error(f"Error deleting transaction: {str(e)}")
+                else:
+                    st.info("No transactions found.")
+            else:
+                st.error(f"Failed to load transactions: {response.text}")
+        
+        except requests.exceptions.ConnectionError:
+            st.error("Cannot connect to API. Make sure the backend is running.")
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+    
+    with tab2:
+        st.subheader("Add New Transaction")
+        
+        with st.form("add_transaction_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                ticker = st.text_input("Ticker Symbol*", placeholder="e.g., AAPL").upper()
+                transaction_type = st.selectbox("Transaction Type*", ["BUY", "SELL"])
+                asset_type = st.selectbox("Asset Type*", ["STOCK", "ETF", "MUTUAL_FUND"])
+                transaction_date = st.date_input("Transaction Date*", value=date.today())
+            
+            with col2:
+                quantity = st.number_input("Quantity (shares)*", min_value=0.0, step=0.01, format="%.2f")
+                price_per_unit = st.number_input("Price per Unit*", min_value=0.0, step=0.01, format="%.2f")
+                fees = st.number_input("Fees", min_value=0.0, step=0.01, value=0.0, format="%.2f")
+                total_amount = st.number_input(
+                    "Total Amount*",
+                    min_value=0.0,
+                    step=0.01,
+                    value=quantity * price_per_unit if quantity and price_per_unit else 0.0,
+                    format="%.2f"
+                )
+            
+            notes = st.text_area("Notes (optional)")
+            
+            submitted = st.form_submit_button("Add Transaction")
+            
+            if submitted:
+                if not ticker or not quantity or not price_per_unit or not total_amount:
+                    st.error("Please fill in all required fields (marked with *)")
+                else:
+                    try:
+                        transaction_data = {
+                            "ticker": ticker,
+                            "transaction_type": transaction_type,
+                            "transaction_date": str(transaction_date),
+                            "quantity": quantity,
+                            "price_per_unit": price_per_unit,
+                            "total_amount": total_amount,
+                            "fees": fees,
+                            "notes": notes,
+                            "asset_type": asset_type
+                        }
+                        
+                        response = make_authenticated_request(
+                            "POST",
+                            "/portfolio/transactions",
+                            json=transaction_data
+                        )
+                        
+                        if response.status_code == 201:
+                            st.success(f"Transaction added successfully!")
+                            st.rerun()
+                        else:
+                            st.error(f"Failed to add transaction: {response.text}")
+                    
+                    except Exception as e:
+                        st.error(f"Error adding transaction: {str(e)}")
+
+
+def portfolio_upload_page():
+    """Upload transactions from JSON"""
+    st.title("📤 Upload Transaction Data")
+    st.markdown("---")
+    
+    st.markdown("""
+    ### Upload Historical Transactions
+    
+    Upload your transaction history from a JSON file or paste JSON directly. 
+    
+    **Supported Formats:**
+    1. **Schwab Brokerage Format** - Direct export from Schwab (automatically detected)
+    2. **Standard Format** - Our simple transaction format
+    """)
+    
+    # Example JSON formats
+    with st.expander("📋 Standard Format Example"):
+        example_json = {
+            "transactions": [
+                {
+                    "ticker": "AAPL",
+                    "transaction_type": "BUY",
+                    "transaction_date": "2024-01-15",
+                    "quantity": 10.0,
+                    "price_per_unit": 185.50,
+                    "total_amount": 1855.00,
+                    "fees": 0.0,
+                    "notes": "Initial purchase",
+                    "asset_type": "STOCK"
+                },
+                {
+                    "ticker": "VTI",
+                    "transaction_type": "BUY",
+                    "transaction_date": "2024-02-01",
+                    "quantity": 25.0,
+                    "price_per_unit": 235.80,
+                    "total_amount": 5895.00,
+                    "fees": 0.0,
+                    "notes": "ETF purchase",
+                    "asset_type": "ETF"
+                }
+            ]
+        }
+        st.json(example_json)
+    
+    with st.expander("📋 Schwab Format Example"):
+        schwab_example = {
+            "FromDate": "11/06/2025",
+            "ToDate": "11/07/2025",
+            "BrokerageTransactions": [
+                {
+                    "Date": "11/07/2025",
+                    "Action": "Buy",
+                    "Symbol": "SCHE",
+                    "Description": "SCHWAB EMERGING MARKETS EQUITY ETF",
+                    "Quantity": "14",
+                    "Price": "$33.3799",
+                    "Fees & Comm": "",
+                    "Amount": "-$467.32"
+                }
+            ]
+        }
+        st.json(schwab_example)
+        st.info("💡 Schwab format is automatically detected and parsed!")
+    
+    st.markdown("---")
+    
+    # Upload method tabs
+    upload_tab1, upload_tab2 = st.tabs(["📁 Upload File", "📋 Paste JSON"])
+    
+    with upload_tab1:
+        st.subheader("Upload JSON File")
+        uploaded_file = st.file_uploader(
+            "Choose a JSON file",
+            type=['json'],
+            help="Upload your Schwab transaction export or standard format JSON file"
+        )
+        
+        if uploaded_file is not None:
+            try:
+                # Read the file
+                file_contents = uploaded_file.read()
+                data = json.loads(file_contents)
+                
+                # Show preview
+                with st.expander("📄 Preview Uploaded Data"):
+                    st.json(data)
+                
+                if st.button("Process and Upload", type="primary", key="upload_file_btn"):
+                    try:
+                        # Upload to API using flexible endpoint
+                        response = make_authenticated_request(
+                            "POST",
+                            "/portfolio/transactions/upload",
+                            json=data
+                        )
+                        
+                        if response.status_code == 201:
+                            created = response.json()
+                            st.success(f"✅ Successfully uploaded {len(created)} transactions!")
+                            
+                            # Show summary
+                            with st.expander("View Uploaded Transactions"):
+                                for txn in created:
+                                    st.write(f"- {txn['ticker']} ({txn['asset_type']}): {txn['transaction_type']} {txn['quantity']} @ ${txn['price_per_unit']} on {txn['transaction_date']}")
+                        else:
+                            st.error(f"Failed to upload transactions: {response.text}")
+                    
+                    except Exception as e:
+                        st.error(f"Error uploading transactions: {str(e)}")
+            
+            except json.JSONDecodeError as e:
+                st.error(f"Invalid JSON file: {str(e)}")
+            except Exception as e:
+                st.error(f"Error reading file: {str(e)}")
+    
+    with upload_tab2:
+        st.subheader("Paste Your JSON Data")
+        json_input = st.text_area(
+            "Transaction JSON",
+            height=300,
+            placeholder='{"transactions": [...]} or Schwab format'
+        )
+        
+        if st.button("Process and Upload", type="primary", key="upload_paste_btn"):
+            if not json_input.strip():
+                st.error("Please paste your JSON data")
+            else:
+                try:
+                    # Parse JSON
+                    data = json.loads(json_input)
+                    
+                    # Upload to API using flexible endpoint
+                    response = make_authenticated_request(
+                        "POST",
+                        "/portfolio/transactions/upload",
+                        json=data
+                    )
+                    
+                    if response.status_code == 201:
+                        created = response.json()
+                        st.success(f"✅ Successfully uploaded {len(created)} transactions!")
+                        
+                        # Show summary
+                        with st.expander("View Uploaded Transactions"):
+                            for txn in created:
+                                st.write(f"- {txn['ticker']} ({txn['asset_type']}): {txn['transaction_type']} {txn['quantity']} @ ${txn['price_per_unit']} on {txn['transaction_date']}")
+                    else:
+                        st.error(f"Failed to upload transactions: {response.text}")
+                
+                except json.JSONDecodeError as e:
+                    st.error(f"Invalid JSON format: {str(e)}")
+                except Exception as e:
+                    st.error(f"Error uploading transactions: {str(e)}")
+
+
+def portfolio_individual_holdings_page():
+    """View individual ticker holdings with detailed breakdown in tabs"""
+    st.title("📊 Individual Holdings Breakdown")
+    st.markdown("---")
+    
+    try:
+        # Get all tickers
+        response = make_authenticated_request("GET", "/portfolio/tickers")
+        if response.status_code == 200:
+            tickers = response.json()
+            
+            if not tickers:
+                st.info("No holdings found. Add transactions first.")
+                return
+            
+            # Create tabs for each ticker
+            tabs = st.tabs(tickers)
+            
+            for i, ticker in enumerate(tickers):
+                with tabs[i]:
+                    st.markdown(f"## {ticker}")
+                    st.markdown("---")
+                    
+                    # Get holding details
+                    holding_response = make_authenticated_request(
+                        "GET",
+                        f"/portfolio/holdings/{ticker}"
+                    )
+                    
+                    if holding_response.status_code == 200:
+                        holding = holding_response.json()
+                        
+                        # Display metrics in a compact row
+                        col1, col2, col3, col4, col5 = st.columns(5)
+                        
+                        with col1:
+                            st.metric("Asset Type", holding['asset_type'])
+                        
+                        with col2:
+                            st.metric("Quantity", f"{holding['total_quantity']:.2f}")
+                        
+                        with col3:
+                            st.metric("Avg Cost", f"${holding['average_cost']:.2f}")
+                        
+                        with col4:
+                            st.metric("Invested", f"${holding['total_invested']:,.2f}")
+                        
+                        with col5:
+                            if holding.get('current_price'):
+                                st.metric(
+                                    "P/L",
+                                    f"${holding['profit_loss']:,.2f}",
+                                    delta=f"{holding['profit_loss_percentage']:.2f}%"
+                                )
+                            else:
+                                st.metric("Current Price", "N/A")
+                        
+                        st.markdown("---")
+                        
+                        # Delete Ticker Section (Danger Zone)
+                        with st.expander("🗑️ Delete Ticker (Remove All Transactions)", expanded=False):
+                            st.warning(f"⚠️ **Warning**: This will permanently delete ALL transactions for **{ticker}** and remove it from your portfolio.")
+                            
+                            # Show transaction count
+                            txn_count_response = make_authenticated_request(
+                                "GET",
+                                "/portfolio/transactions",
+                                params={"ticker": ticker}
+                            )
+                            
+                            if txn_count_response.status_code == 200:
+                                txn_count = len(txn_count_response.json())
+                                st.info(f"📊 This ticker has **{txn_count}** transaction(s) that will be deleted.")
+                            
+                            st.markdown("---")
+                            
+                            # Confirmation checkbox
+                            confirm_delete_ticker = st.checkbox(
+                                f"I understand this will delete all {ticker} data permanently",
+                                key=f"confirm_delete_ticker_{ticker}"
+                            )
+                            
+                            if confirm_delete_ticker:
+                                if st.button(
+                                    f"🗑️ DELETE ALL {ticker} TRANSACTIONS",
+                                    key=f"delete_all_ticker_{ticker}",
+                                    type="primary",
+                                    use_container_width=True
+                                ):
+                                    try:
+                                        # Get all transactions for this ticker
+                                        response = make_authenticated_request(
+                                            "GET",
+                                            "/portfolio/transactions",
+                                            params={"ticker": ticker}
+                                        )
+                                        
+                                        if response.status_code == 200:
+                                            transactions_to_delete = response.json()
+                                            deleted_count = 0
+                                            failed_count = 0
+                                            
+                                            # Delete each transaction
+                                            for txn in transactions_to_delete:
+                                                del_response = make_authenticated_request(
+                                                    "DELETE",
+                                                    f"/portfolio/transactions/{txn['id']}"
+                                                )
+                                                
+                                                if del_response.status_code == 204:
+                                                    deleted_count += 1
+                                                else:
+                                                    failed_count += 1
+                                            
+                                            if deleted_count > 0:
+                                                st.success(f"✅ Successfully deleted {deleted_count} transaction(s) for {ticker}!")
+                                                st.info("Refreshing page...")
+                                                st.rerun()
+                                            else:
+                                                st.error("No transactions were deleted.")
+                                            
+                                            if failed_count > 0:
+                                                st.error(f"❌ Failed to delete {failed_count} transaction(s)")
+                                        else:
+                                            st.error(f"Failed to fetch transactions: {response.text}")
+                                    
+                                    except Exception as e:
+                                        st.error(f"Error deleting ticker: {str(e)}")
+                        
+                        st.markdown("---")
+                        
+                        # Quick Add Transaction Form
+                        with st.expander("➕ Quick Add Transaction", expanded=False):
+                            with st.form(f"quick_add_transaction_{ticker}"):
+                                st.markdown(f"**Add transaction for {ticker}**")
+                                
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    transaction_type = st.selectbox(
+                                        "Transaction Type*", 
+                                        ["BUY", "SELL"],
+                                        key=f"quick_txn_type_{ticker}"
+                                    )
+                                    transaction_date = st.date_input(
+                                        "Transaction Date*", 
+                                        value=date.today(),
+                                        key=f"quick_txn_date_{ticker}"
+                                    )
+                                    quantity = st.number_input(
+                                        "Quantity (shares)*", 
+                                        min_value=0.0, 
+                                        step=0.01, 
+                                        format="%.2f",
+                                        key=f"quick_quantity_{ticker}"
+                                    )
+                                
+                                with col2:
+                                    price_per_unit = st.number_input(
+                                        "Price per Unit*", 
+                                        min_value=0.0, 
+                                        step=0.01, 
+                                        format="%.2f",
+                                        key=f"quick_price_{ticker}"
+                                    )
+                                    fees = st.number_input(
+                                        "Fees", 
+                                        min_value=0.0, 
+                                        step=0.01, 
+                                        value=0.0, 
+                                        format="%.2f",
+                                        key=f"quick_fees_{ticker}"
+                                    )
+                                    total_amount = st.number_input(
+                                        "Total Amount*",
+                                        min_value=0.0,
+                                        step=0.01,
+                                        value=quantity * price_per_unit if quantity and price_per_unit else 0.0,
+                                        format="%.2f",
+                                        key=f"quick_total_{ticker}"
+                                    )
+                                
+                                notes = st.text_area(
+                                    "Notes (optional)",
+                                    key=f"quick_notes_{ticker}"
+                                )
+                                
+                                submitted = st.form_submit_button("Add Transaction", use_container_width=True)
+                                
+                                if submitted:
+                                    if not quantity or not price_per_unit or not total_amount:
+                                        st.error("Please fill in all required fields (marked with *)")
+                                    else:
+                                        try:
+                                            transaction_data = {
+                                                "ticker": ticker,
+                                                "transaction_type": transaction_type,
+                                                "transaction_date": str(transaction_date),
+                                                "quantity": quantity,
+                                                "price_per_unit": price_per_unit,
+                                                "total_amount": total_amount,
+                                                "fees": fees,
+                                                "notes": notes,
+                                                "asset_type": holding['asset_type']  # Use existing asset type
+                                            }
+                                            
+                                            response = make_authenticated_request(
+                                                "POST",
+                                                "/portfolio/transactions",
+                                                json=transaction_data
+                                            )
+                                            
+                                            if response.status_code == 201:
+                                                st.success(f"✅ Transaction added successfully for {ticker}!")
+                                                st.info("Refreshing page to show updated data...")
+                                                st.rerun()
+                                            else:
+                                                st.error(f"Failed to add transaction: {response.text}")
+                                        
+                                        except Exception as e:
+                                            st.error(f"Error adding transaction: {str(e)}")
+                        
+                        st.markdown("---")
+                        
+                        # Get all transactions for this ticker
+                        txn_response = make_authenticated_request(
+                            "GET",
+                            "/portfolio/transactions",
+                            params={"ticker": ticker}
+                        )
+                        
+                        if txn_response.status_code == 200:
+                            transactions = txn_response.json()
+                            
+                            if transactions:
+                                # Get split information for this ticker
+                                try:
+                                    split_response = make_authenticated_request(
+                                        "GET",
+                                        f"/portfolio/splits/{ticker}"
+                                    )
+                                    splits_data = split_response.json() if split_response.status_code == 200 else {}
+                                    splits = splits_data.get('splits', {})
+                                    
+                                    # Show split information if any
+                                    if splits:
+                                        st.info(
+                                            f"📊 **Stock Splits Detected:** {len(splits)} split(s) applied to historical data. "
+                                            f"All quantities and prices are adjusted for accurate tracking."
+                                        )
+                                        with st.expander("View Split Details"):
+                                            for split_date, split_ratio in splits.items():
+                                                st.write(f"**{split_date}**: {split_ratio:.2f}-for-1 split")
+                                except:
+                                    splits = {}
+                                
+                                # Sort by date
+                                transactions_sorted = sorted(transactions, key=lambda x: x['transaction_date'])
+                                
+                                # Apply split adjustments to historical transactions
+                                # This ensures we're comparing post-split prices with post-split current price
+                                for txn in transactions_sorted:
+                                    # Get split ratio for this transaction
+                                    txn_date_obj = txn['transaction_date']
+                                    if isinstance(txn_date_obj, str):
+                                        from datetime import datetime as dt
+                                        txn_date_obj = dt.strptime(txn_date_obj, "%Y-%m-%d").date()
+                                    
+                                    # Calculate split adjustment
+                                    split_ratio = 1.0
+                                    if splits:
+                                        for split_date_str, ratio in splits.items():
+                                            try:
+                                                from datetime import datetime as dt
+                                                split_date = dt.strptime(split_date_str, '%Y-%m-%d').date()
+                                                # If split happened AFTER this transaction, adjust the price
+                                                if split_date > txn_date_obj:
+                                                    split_ratio *= ratio
+                                            except:
+                                                continue
+                                    
+                                    # Apply split adjustment to this transaction
+                                    # Quantity increases, price decreases by split ratio
+                                    if split_ratio != 1.0:
+                                        txn['quantity'] = txn['quantity'] * split_ratio
+                                        txn['price_per_unit'] = txn['price_per_unit'] / split_ratio
+                                        # total_amount stays the same (quantity × price remains constant)
+                                
+                                # Calculate cumulative gain/loss over time (matching Excel logic)
+                                # Each purchase lot contributes: (lot_quantity × current_price) - lot_cost
+                                # Cumulative = Sum of all lot contributions (for remaining lots after FIFO sells)
+                                # This shows the total performance across all your investments at different cost bases
+                                timeline_data = []
+                                
+                                # Track purchase lots with their original purchase price for delta calculation
+                                purchase_lots = []  # List of {'quantity': float, 'price_per_unit': float, 'total_cost': float, 'date': str}
+                                
+                                # Get current market price to use for all calculations
+                                current_market_price = holding.get('current_price')
+                                
+                                if not current_market_price:
+                                    # Fallback: use last transaction price if no current price
+                                    if transactions_sorted:
+                                        current_market_price = transactions_sorted[-1]['price_per_unit']
+                                
+                                for txn in transactions_sorted:
+                                    txn_date = txn['transaction_date']
+                                    txn_type = txn['transaction_type']
+                                    quantity = txn['quantity']
+                                    price = txn['price_per_unit']
+                                    total_cost = txn['total_amount'] + txn.get('fees', 0)
+                                    
+                                    if txn_type == 'BUY':
+                                        # Add this purchase lot with its original purchase price
+                                        purchase_lots.append({
+                                            'quantity': quantity,
+                                            'price_per_unit': price,
+                                            'total_cost': total_cost,
+                                            'date': txn_date
+                                        })
+                                        
+                                    elif txn_type == 'SELL':
+                                        # Remove sold shares using FIFO
+                                        remaining_to_sell = quantity
+                                        
+                                        while remaining_to_sell > 0 and purchase_lots:
+                                            lot = purchase_lots[0]
+                                            lot_quantity = lot['quantity']
+                                            
+                                            if lot_quantity <= remaining_to_sell:
+                                                # Sell entire lot
+                                                remaining_to_sell -= lot_quantity
+                                                purchase_lots.pop(0)
+                                            else:
+                                                # Sell partial lot - reduce quantity proportionally
+                                                sold_ratio = remaining_to_sell / lot_quantity
+                                                lot['quantity'] -= remaining_to_sell
+                                                lot['total_cost'] -= (lot['total_cost'] * sold_ratio)
+                                                # price_per_unit stays the same (original purchase price)
+                                                remaining_to_sell = 0
+                                    
+                                    # Calculate cumulative gain/loss: sum of each lot's contribution
+                                    # Each lot contributes: (lot_qty × current_price) - lot_cost
+                                    cumulative_gain_loss = 0.0
+                                    total_quantity = 0.0
+                                    total_cost_basis = 0.0
+                                    
+                                    if current_market_price:
+                                        for lot in purchase_lots:
+                                            lot_current_value = lot['quantity'] * current_market_price
+                                            lot_gain_loss = lot_current_value - lot['total_cost']
+                                            cumulative_gain_loss += lot_gain_loss
+                                            total_quantity += lot['quantity']
+                                            total_cost_basis += lot['total_cost']
+                                    else:
+                                        total_quantity = sum(lot['quantity'] for lot in purchase_lots)
+                                        total_cost_basis = sum(lot['total_cost'] for lot in purchase_lots)
+                                    
+                                    avg_cost_basis = total_cost_basis / total_quantity if total_quantity > 0 else 0
+                                    
+                                    timeline_data.append({
+                                        'date': txn_date,
+                                        'quantity': total_quantity,
+                                        'avg_cost': avg_cost_basis,
+                                        'invested': total_cost_basis,
+                                        'cumulative_gain_loss': cumulative_gain_loss,
+                                        'transaction_type': txn_type,
+                                        'transaction_quantity': quantity,
+                                        'transaction_price': price
+                                    })
+                                
+                                # Add final data point with current price if available (for most up-to-date view)
+                                if current_market_price and timeline_data:
+                                    last_entry = timeline_data[-1]
+                                    
+                                    # Use today's date for the final point
+                                    from datetime import datetime
+                                    final_date = datetime.now().date().isoformat()
+                                    
+                                    # Recalculate cumulative with current price (sum of all lot contributions)
+                                    final_cumulative = 0.0
+                                    for lot in purchase_lots:
+                                        lot_current_value = lot['quantity'] * current_market_price
+                                        lot_gain_loss = lot_current_value - lot['total_cost']
+                                        final_cumulative += lot_gain_loss
+                                    
+                                    timeline_data.append({
+                                        'date': final_date,
+                                        'quantity': last_entry['quantity'],
+                                        'avg_cost': last_entry['avg_cost'],
+                                        'invested': last_entry['invested'],
+                                        'cumulative_gain_loss': final_cumulative,
+                                        'transaction_type': 'CURRENT',
+                                        'transaction_quantity': 0,
+                                        'transaction_price': current_market_price
+                                    })
+                                
+                                # Plot cumulative gain/loss timeline
+                                st.markdown("### 📈 Cumulative Gain/Loss Over Time")
+                                
+                                if timeline_data:
+                                    try:
+                                        import plotly.graph_objects as go
+                                        import pandas as pd
+                                        from datetime import datetime
+                                        
+                                        df = pd.DataFrame(timeline_data)
+                                        
+                                        # Convert date strings to datetime objects
+                                        df['date'] = pd.to_datetime(df['date'])
+                                        
+                                        # CRITICAL: Force numeric type and clean any issues
+                                        df['cumulative_gain_loss'] = pd.to_numeric(df['cumulative_gain_loss'], errors='coerce')
+                                        
+                                        # Create figure focused on cumulative gain/loss
+                                        fig = go.Figure()
+                                        
+                                        # Determine line color based on final gain/loss (green for positive, red for negative)
+                                        final_gain_loss = float(df['cumulative_gain_loss'].iloc[-1])
+                                        line_color = '#00cc88' if final_gain_loss >= 0 else '#ff4444'  # Streamlit-style colors
+                                        
+                                        # Set fill color based on gain/loss
+                                        if final_gain_loss >= 0:
+                                            fill_color = 'rgba(0, 204, 136, 0.15)'  # Light green
+                                        else:
+                                            fill_color = 'rgba(255, 68, 68, 0.15)'  # Light red
+                                        
+                                        # Convert to lists to avoid any pandas/plotly interaction issues
+                                        x_data = df['date'].tolist()
+                                        y_data = df['cumulative_gain_loss'].tolist()
+                                        
+                                        # Add cumulative gain/loss line
+                                        fig.add_trace(go.Scatter(
+                                            x=x_data,
+                                            y=y_data,
+                                            mode='lines+markers',
+                                            name='Cumulative Gain/Loss',
+                                            line=dict(color=line_color, width=3),
+                                            marker=dict(size=6, color=line_color),
+                                            hovertemplate='<b>%{x}</b><br>Cumulative Gain/Loss: $%{y:,.2f}<extra></extra>',
+                                            fill='tozeroy',
+                                            fillcolor=fill_color
+                                        ))
+                                        
+                                        # Update layout - match app style
+                                        fig.update_layout(
+                                            title=dict(
+                                                text=f"{ticker} - Cumulative Gain/Loss Over Time",
+                                                font=dict(size=18)
+                                            ),
+                                            xaxis_title="Date",
+                                            yaxis_title="Cumulative Gain/Loss ($)",
+                                            hovermode='x unified',
+                                            showlegend=False,
+                                            height=500,
+                                            plot_bgcolor='rgba(0,0,0,0)',
+                                            paper_bgcolor='rgba(0,0,0,0)',
+                                            xaxis=dict(
+                                                showgrid=True,
+                                                gridcolor='rgba(128, 128, 128, 0.2)',
+                                                showline=True,
+                                                linecolor='rgba(128, 128, 128, 0.3)'
+                                            ),
+                                            yaxis=dict(
+                                                showgrid=True,
+                                                gridcolor='rgba(128, 128, 128, 0.2)',
+                                                showline=True,
+                                                linecolor='rgba(128, 128, 128, 0.3)',
+                                                range=[min(y_data) - abs(min(y_data) * 0.1), max(y_data) + abs(max(y_data) * 0.1)],  # 10% padding
+                                                tickprefix='$',  # Add $ to all tick labels
+                                                tickformat=',.0f'  # Format with commas, no decimals
+                                            )
+                                        )
+                                        
+                                        # Add zero line for reference
+                                        fig.add_hline(y=0, line_dash="dash", line_color="rgba(128, 128, 128, 0.5)", opacity=0.7)
+                                        
+                                        # Use a unique key to force fresh render
+                                        chart_key = f"portfolio_chart_{ticker}_{datetime.now().timestamp()}"
+                                        st.plotly_chart(fig, use_container_width=True, key=chart_key)
+                                        
+                                        # Show current position summary
+                                        if holding.get('current_price'):
+                                            st.success(
+                                                f"**Current Position:** {holding['total_quantity']:.2f} shares @ ${holding['current_price']:.2f} = "
+                                                f"${holding['current_value']:,.2f} "
+                                                f"({'📈 +' if holding['profit_loss'] >= 0 else '📉 '}"
+                                                f"${abs(holding['profit_loss']):,.2f} / "
+                                                f"{holding['profit_loss_percentage']:.2f}%)"
+                                            )
+                                        else:
+                                            st.info(
+                                                f"**Current Position:** {holding['total_quantity']:.2f} shares "
+                                                f"(Cost Basis: ${holding['average_cost']:.2f}/share, "
+                                                f"Total Invested: ${holding['total_invested']:,.2f})"
+                                            )
+                                        
+                                    except ImportError:
+                                        st.warning("Install plotly for timeline visualization: pip install plotly")
+                                        # Fallback to simple metrics
+                                        if timeline_data:
+                                            latest = timeline_data[-1]
+                                            col1, col2, col3 = st.columns(3)
+                                            with col1:
+                                                st.metric("Total Invested", f"${latest['invested']:,.2f}")
+                                            with col2:
+                                                st.metric("Current Value", f"${latest['current_value']:,.2f}")
+                                            with col3:
+                                                st.metric("Cumulative Gain/Loss", f"${latest['cumulative_gain_loss']:,.2f}")
+                                
+                                st.markdown("---")
+                                
+                                # Transaction history in collapsible expander
+                                with st.expander("📋 Transaction History", expanded=False):
+                                    if transactions_sorted:
+                                        st.markdown(f"**{len(transactions_sorted)} transaction(s)**")
+                                        
+                                        # Initialize session state for selected transactions if not exists
+                                        if f'selected_txns_{ticker}' not in st.session_state:
+                                            st.session_state[f'selected_txns_{ticker}'] = []
+                                        
+                                        # Sorting controls
+                                        sort_col1, sort_col2, sort_col3 = st.columns([2, 2, 6])
+                                        with sort_col1:
+                                            sort_by = st.selectbox(
+                                                "Sort by",
+                                                ["Date", "Type", "Quantity", "Price", "Total", "Fees"],
+                                                key=f"sort_by_{ticker}"
+                                            )
+                                        with sort_col2:
+                                            sort_order = st.selectbox(
+                                                "Order",
+                                                ["Descending", "Ascending"],
+                                                key=f"sort_order_{ticker}"
+                                            )
+                                        
+                                        # Apply sorting
+                                        sort_key_map = {
+                                            "Date": "transaction_date",
+                                            "Type": "transaction_type",
+                                            "Quantity": "quantity",
+                                            "Price": "price_per_unit",
+                                            "Total": "total_amount",
+                                            "Fees": "fees"
+                                        }
+                                        sort_key = sort_key_map[sort_by]
+                                        reverse_sort = (sort_order == "Descending")
+                                        
+                                        transactions_sorted = sorted(
+                                            transactions_sorted,
+                                            key=lambda x: x[sort_key],
+                                            reverse=reverse_sort
+                                        )
+                                        
+                                        st.markdown("---")
+                                        
+                                        # Bulk actions header
+                                        col1, col2, col3 = st.columns([1, 1, 4])
+                                        with col1:
+                                            if st.button("Select All", key=f"select_all_{ticker}"):
+                                                st.session_state[f'selected_txns_{ticker}'] = [txn['id'] for txn in transactions_sorted]
+                                                st.rerun()
+                                        with col2:
+                                            if st.button("Deselect All", key=f"deselect_all_{ticker}"):
+                                                st.session_state[f'selected_txns_{ticker}'] = []
+                                                st.rerun()
+                                        with col3:
+                                            selected_count = len(st.session_state[f'selected_txns_{ticker}'])
+                                            if selected_count > 0:
+                                                if st.button(
+                                                    f"🗑️ Delete {selected_count} Selected",
+                                                    key=f"bulk_delete_txns_{ticker}",
+                                                    type="primary"
+                                                ):
+                                                    try:
+                                                        deleted_count = 0
+                                                        failed_count = 0
+                                                        
+                                                        for txn_id in st.session_state[f'selected_txns_{ticker}']:
+                                                            response = make_authenticated_request(
+                                                                "DELETE",
+                                                                f"/portfolio/transactions/{txn_id}"
+                                                            )
+                                                            
+                                                            if response.status_code == 204:
+                                                                deleted_count += 1
+                                                            else:
+                                                                failed_count += 1
+                                                        
+                                                        # Clear selection
+                                                        st.session_state[f'selected_txns_{ticker}'] = []
+                                                        
+                                                        if deleted_count > 0:
+                                                            st.success(f"✅ Successfully deleted {deleted_count} transaction(s)!")
+                                                        if failed_count > 0:
+                                                            st.error(f"❌ Failed to delete {failed_count} transaction(s)")
+                                                        
+                                                        st.rerun()
+                                                    
+                                                    except Exception as e:
+                                                        st.error(f"Error deleting transactions: {str(e)}")
+                                        
+                                        st.markdown("---")
+                                        
+                                        # Display transactions with individual action buttons
+                                        for txn in transactions_sorted:
+                                            # Check if this transaction is being edited
+                                            edit_key = f'edit_txn_{ticker}_{txn["id"]}'
+                                            is_editing = st.session_state.get(edit_key, False)
+                                            
+                                            if is_editing:
+                                                # Show edit form in a container
+                                                with st.container():
+                                                    st.markdown(f"**✏️ Editing Transaction (ID: {txn['id']})**")
+                                                    
+                                                    with st.form(f"edit_form_{ticker}_{txn['id']}"):
+                                                        col1, col2 = st.columns(2)
+                                                        
+                                                        with col1:
+                                                            edit_type = st.selectbox(
+                                                                "Type",
+                                                                ["BUY", "SELL"],
+                                                                index=0 if txn['transaction_type'] == "BUY" else 1,
+                                                                key=f"edit_type_{ticker}_{txn['id']}"
+                                                            )
+                                                            from datetime import datetime as dt
+                                                            txn_date = dt.strptime(txn['transaction_date'], "%Y-%m-%d").date() if isinstance(txn['transaction_date'], str) else txn['transaction_date']
+                                                            edit_date = st.date_input(
+                                                                "Date",
+                                                                value=txn_date,
+                                                                key=f"edit_date_{ticker}_{txn['id']}"
+                                                            )
+                                                            edit_quantity = st.number_input(
+                                                                "Quantity",
+                                                                min_value=0.0,
+                                                                value=float(txn['quantity']),
+                                                                step=0.01,
+                                                                format="%.2f",
+                                                                key=f"edit_qty_{ticker}_{txn['id']}"
+                                                            )
+                                                        
+                                                        with col2:
+                                                            edit_price = st.number_input(
+                                                                "Price/Unit",
+                                                                min_value=0.0,
+                                                                value=float(txn['price_per_unit']),
+                                                                step=0.01,
+                                                                format="%.2f",
+                                                                key=f"edit_price_{ticker}_{txn['id']}"
+                                                            )
+                                                            edit_fees = st.number_input(
+                                                                "Fees",
+                                                                min_value=0.0,
+                                                                value=float(txn['fees']),
+                                                                step=0.01,
+                                                                format="%.2f",
+                                                                key=f"edit_fees_{ticker}_{txn['id']}"
+                                                            )
+                                                            edit_total = st.number_input(
+                                                                "Total",
+                                                                min_value=0.0,
+                                                                value=float(txn['total_amount']),
+                                                                step=0.01,
+                                                                format="%.2f",
+                                                                key=f"edit_total_{ticker}_{txn['id']}"
+                                                            )
+                                                        
+                                                        edit_notes = st.text_area(
+                                                            "Notes",
+                                                            value=txn.get('notes', ''),
+                                                            key=f"edit_notes_{ticker}_{txn['id']}"
+                                                        )
+                                                        
+                                                        col1, col2 = st.columns(2)
+                                                        with col1:
+                                                            save_btn = st.form_submit_button("💾 Save Changes", use_container_width=True)
+                                                        with col2:
+                                                            cancel_btn = st.form_submit_button("❌ Cancel", use_container_width=True)
+                                                        
+                                                        if save_btn:
+                                                            try:
+                                                                update_data = {
+                                                                    "transaction_type": edit_type,
+                                                                    "transaction_date": str(edit_date),
+                                                                    "quantity": edit_quantity,
+                                                                    "price_per_unit": edit_price,
+                                                                    "total_amount": edit_total,
+                                                                    "fees": edit_fees,
+                                                                    "notes": edit_notes
+                                                                }
+                                                                
+                                                                response = make_authenticated_request(
+                                                                    "PUT",
+                                                                    f"/portfolio/transactions/{txn['id']}",
+                                                                    json=update_data
+                                                                )
+                                                                
+                                                                if response.status_code == 200:
+                                                                    st.session_state[edit_key] = False
+                                                                    st.success("✅ Transaction updated!")
+                                                                    st.rerun()
+                                                                else:
+                                                                    st.error(f"Failed to update: {response.text}")
+                                                            except Exception as e:
+                                                                st.error(f"Error: {str(e)}")
+                                                        
+                                                        if cancel_btn:
+                                                            st.session_state[edit_key] = False
+                                                            st.rerun()
+                                                
+                                                st.markdown("---")
+                                            else:
+                                                # Normal transaction display
+                                                col1, col2, col3 = st.columns([0.5, 7.5, 2])
+                                                
+                                                with col1:
+                                                    is_selected = txn['id'] in st.session_state[f'selected_txns_{ticker}']
+                                                    if st.checkbox(
+                                                        "",
+                                                        value=is_selected,
+                                                        key=f"txn_checkbox_{ticker}_{txn['id']}",
+                                                        label_visibility="collapsed"
+                                                    ):
+                                                        if txn['id'] not in st.session_state[f'selected_txns_{ticker}']:
+                                                            st.session_state[f'selected_txns_{ticker}'].append(txn['id'])
+                                                    else:
+                                                        if txn['id'] in st.session_state[f'selected_txns_{ticker}']:
+                                                            st.session_state[f'selected_txns_{ticker}'].remove(txn['id'])
+                                                
+                                                with col2:
+                                                    # Transaction display
+                                                    txn_type_emoji = "🟢" if txn['transaction_type'] == "BUY" else "🔴"
+                                                    st.markdown(f"**{txn_type_emoji} {txn['transaction_date']}** - {txn['transaction_type']}")
+                                                    
+                                                    info_col1, info_col2, info_col3, info_col4 = st.columns(4)
+                                                    with info_col1:
+                                                        st.caption(f"Qty: {txn['quantity']:.2f}")
+                                                    with info_col2:
+                                                        st.caption(f"Price: ${txn['price_per_unit']:.2f}")
+                                                    with info_col3:
+                                                        st.caption(f"Total: ${txn['total_amount']:,.2f}")
+                                                    with info_col4:
+                                                        st.caption(f"Fees: ${txn['fees']:.2f}")
+                                                    
+                                                    if txn.get('notes'):
+                                                        st.caption(f"📝 {txn['notes']}")
+                                                
+                                                with col3:
+                                                    # Action buttons
+                                                    btn_col1, btn_col2 = st.columns(2)
+                                                    with btn_col1:
+                                                        if st.button("✏️", key=f"edit_btn_{ticker}_{txn['id']}", help="Edit"):
+                                                            st.session_state[edit_key] = True
+                                                            st.rerun()
+                                                    with btn_col2:
+                                                        if st.button("🗑️", key=f"delete_btn_{ticker}_{txn['id']}", help="Delete"):
+                                                            # Set delete confirmation state
+                                                            st.session_state[f'confirm_delete_{ticker}_{txn["id"]}'] = True
+                                                            st.rerun()
+                                                
+                                                # Show delete confirmation if needed
+                                                if st.session_state.get(f'confirm_delete_{ticker}_{txn["id"]}', False):
+                                                    st.warning(f"⚠️ Delete this transaction?")
+                                                    conf_col1, conf_col2 = st.columns(2)
+                                                    with conf_col1:
+                                                        if st.button("✅ Yes, Delete", key=f"confirm_yes_{ticker}_{txn['id']}"):
+                                                            try:
+                                                                response = make_authenticated_request(
+                                                                    "DELETE",
+                                                                    f"/portfolio/transactions/{txn['id']}"
+                                                                )
+                                                                
+                                                                if response.status_code == 204:
+                                                                    st.session_state[f'confirm_delete_{ticker}_{txn["id"]}'] = False
+                                                                    st.success("✅ Transaction deleted!")
+                                                                    st.rerun()
+                                                                else:
+                                                                    st.error(f"Failed to delete: {response.text}")
+                                                            except Exception as e:
+                                                                st.error(f"Error: {str(e)}")
+                                                    with conf_col2:
+                                                        if st.button("❌ Cancel", key=f"confirm_no_{ticker}_{txn['id']}"):
+                                                            st.session_state[f'confirm_delete_{ticker}_{txn["id"]}'] = False
+                                                            st.rerun()
+                                                
+                                                st.markdown("---")
+                                    else:
+                                        st.info("No transactions found.")
+                            else:
+                                st.info("No transactions found for this ticker.")
+                    else:
+                        # No current holdings (but ticker exists in transaction list)
+                        st.info(f"ℹ️ No current holdings for **{ticker}** (all shares may have been sold)")
+                        st.markdown("---")
+                        
+                        # Still show delete option for tickers with no current holdings
+                        with st.expander("🗑️ Delete Ticker (Remove All Transactions)", expanded=True):
+                            st.warning(f"⚠️ **Warning**: This will permanently delete ALL transactions for **{ticker}** and remove it from your portfolio.")
+                            
+                            # Show transaction count
+                            txn_count_response = make_authenticated_request(
+                                "GET",
+                                "/portfolio/transactions",
+                                params={"ticker": ticker}
+                            )
+                            
+                            if txn_count_response.status_code == 200:
+                                txn_count = len(txn_count_response.json())
+                                st.info(f"📊 This ticker has **{txn_count}** transaction(s) that will be deleted.")
+                            
+                            st.markdown("---")
+                            
+                            # Confirmation checkbox
+                            confirm_delete_ticker = st.checkbox(
+                                f"I understand this will delete all {ticker} data permanently",
+                                key=f"confirm_delete_ticker_noholdings_{ticker}"
+                            )
+                            
+                            if confirm_delete_ticker:
+                                if st.button(
+                                    f"🗑️ DELETE ALL {ticker} TRANSACTIONS",
+                                    key=f"delete_all_ticker_noholdings_{ticker}",
+                                    type="primary",
+                                    use_container_width=True
+                                ):
+                                    try:
+                                        # Get all transactions for this ticker
+                                        response = make_authenticated_request(
+                                            "GET",
+                                            "/portfolio/transactions",
+                                            params={"ticker": ticker}
+                                        )
+                                        
+                                        if response.status_code == 200:
+                                            transactions_to_delete = response.json()
+                                            deleted_count = 0
+                                            failed_count = 0
+                                            
+                                            # Delete each transaction
+                                            for txn in transactions_to_delete:
+                                                del_response = make_authenticated_request(
+                                                    "DELETE",
+                                                    f"/portfolio/transactions/{txn['id']}"
+                                                )
+                                                
+                                                if del_response.status_code == 204:
+                                                    deleted_count += 1
+                                                else:
+                                                    failed_count += 1
+                                            
+                                            if deleted_count > 0:
+                                                st.success(f"✅ Successfully deleted {deleted_count} transaction(s) for {ticker}!")
+                                                st.info("Refreshing page...")
+                                                st.rerun()
+                                            else:
+                                                st.error("No transactions were deleted.")
+                                            
+                                            if failed_count > 0:
+                                                st.error(f"❌ Failed to delete {failed_count} transaction(s)")
+                                        else:
+                                            st.error(f"Failed to fetch transactions: {response.text}")
+                                    
+                                    except Exception as e:
+                                        st.error(f"Error deleting ticker: {str(e)}")
+        else:
+            st.error(f"Failed to load tickers: {response.text}")
+    
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot connect to API. Make sure the backend is running.")
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
         import traceback
         st.code(traceback.format_exc())
 

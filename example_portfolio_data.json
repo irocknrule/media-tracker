@@ -1,0 +1,115 @@
+{
+  "transactions": [
+    {
+      "ticker": "AAPL",
+      "transaction_type": "BUY",
+      "transaction_date": "2024-01-15",
+      "quantity": 10.0,
+      "price_per_unit": 185.50,
+      "total_amount": 1855.00,
+      "fees": 0.0,
+      "notes": "Initial Apple stock purchase",
+      "asset_type": "STOCK"
+    },
+    {
+      "ticker": "VTI",
+      "transaction_type": "BUY",
+      "transaction_date": "2024-02-01",
+      "quantity": 25.0,
+      "price_per_unit": 235.80,
+      "total_amount": 5895.00,
+      "fees": 0.0,
+      "notes": "Vanguard Total Stock Market ETF",
+      "asset_type": "ETF"
+    },
+    {
+      "ticker": "TSLA",
+      "transaction_type": "BUY",
+      "transaction_date": "2024-03-10",
+      "quantity": 5.0,
+      "price_per_unit": 180.00,
+      "total_amount": 900.00,
+      "fees": 0.0,
+      "notes": "Tesla stock purchase",
+      "asset_type": "STOCK"
+    },
+    {
+      "ticker": "AAPL",
+      "transaction_type": "BUY",
+      "transaction_date": "2024-04-20",
+      "quantity": 5.0,
+      "price_per_unit": 190.00,
+      "total_amount": 950.00,
+      "fees": 0.0,
+      "notes": "Additional Apple shares",
+      "asset_type": "STOCK"
+    },
+    {
+      "ticker": "VOO",
+      "transaction_type": "BUY",
+      "transaction_date": "2024-05-15",
+      "quantity": 10.0,
+      "price_per_unit": 485.00,
+      "total_amount": 4850.00,
+      "fees": 0.0,
+      "notes": "Vanguard S&P 500 ETF",
+      "asset_type": "ETF"
+    },
+    {
+      "ticker": "VFIAX",
+      "transaction_type": "BUY",
+      "transaction_date": "2024-06-01",
+      "quantity": 15.0,
+      "price_per_unit": 380.00,
+      "total_amount": 5700.00,
+      "fees": 0.0,
+      "notes": "Vanguard 500 Index Fund Admiral Shares",
+      "asset_type": "MUTUAL_FUND"
+    },
+    {
+      "ticker": "MSFT",
+      "transaction_type": "BUY",
+      "transaction_date": "2024-07-10",
+      "quantity": 8.0,
+      "price_per_unit": 430.00,
+      "total_amount": 3440.00,
+      "fees": 0.0,
+      "notes": "Microsoft stock purchase",
+      "asset_type": "STOCK"
+    },
+    {
+      "ticker": "TSLA",
+      "transaction_type": "SELL",
+      "transaction_date": "2024-08-15",
+      "quantity": 2.0,
+      "price_per_unit": 220.00,
+      "total_amount": 440.00,
+      "fees": 0.0,
+      "notes": "Partial sell of Tesla position",
+      "asset_type": "STOCK"
+    },
+    {
+      "ticker": "QQQ",
+      "transaction_type": "BUY",
+      "transaction_date": "2024-09-01",
+      "quantity": 12.0,
+      "price_per_unit": 450.00,
+      "total_amount": 5400.00,
+      "fees": 0.0,
+      "notes": "Invesco QQQ Trust",
+      "asset_type": "ETF"
+    },
+    {
+      "ticker": "NVDA",
+      "transaction_type": "BUY",
+      "transaction_date": "2024-10-15",
+      "quantity": 6.0,
+      "price_per_unit": 520.00,
+      "total_amount": 3120.00,
+      "fees": 0.0,
+      "notes": "NVIDIA stock purchase",
+      "asset_type": "STOCK"
+    }
+  ]
+}
+

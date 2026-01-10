@@ -98,3 +98,19 @@ class HabitLog(Base):
     unit = Column(String, nullable=False)  # e.g., "min", "mi", "ft"
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
+class PortfolioTransaction(Base):
+    __tablename__ = "portfolio_transactions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    ticker = Column(String, nullable=False, index=True)  # Stock ticker symbol (e.g., "AAPL", "VTI")
+    transaction_type = Column(String, nullable=False)  # "BUY" or "SELL"
+    transaction_date = Column(Date, nullable=False, index=True)
+    quantity = Column(Float, nullable=False)  # Number of shares/units
+    price_per_unit = Column(Float, nullable=False)  # Price per share at transaction
+    total_amount = Column(Float, nullable=False)  # Total transaction amount
+    fees = Column(Float, default=0.0)  # Transaction fees
+    notes = Column(String)  # Optional notes
+    asset_type = Column(String, nullable=False)  # "STOCK", "ETF", or "MUTUAL_FUND"
+    created_at = Column(DateTime, default=datetime.utcnow)
+

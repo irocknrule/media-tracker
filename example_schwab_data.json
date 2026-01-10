@@ -1,0 +1,38 @@
+{
+  "FromDate": "11/06/2025",
+  "ToDate": "11/07/2025",
+  "TotalTransactionsAmount": "-$3,461.11",
+  "BrokerageTransactions": [
+    {
+      "Date": "11/07/2025",
+      "Action": "Buy",
+      "Symbol": "SCHE",
+      "Description": "SCHWAB EMERGING MARKETS EQUITY ETF",
+      "Quantity": "14",
+      "Price": "$33.3799",
+      "Fees & Comm": "",
+      "Amount": "-$467.32"
+    },
+    {
+      "Date": "11/07/2025",
+      "Action": "Buy",
+      "Symbol": "SCHB",
+      "Description": "SCHWAB US BROAD MARKET ETF",
+      "Quantity": "39",
+      "Price": "$25.555",
+      "Fees & Comm": "",
+      "Amount": "-$996.65"
+    },
+    {
+      "Date": "11/07/2025",
+      "Action": "Buy",
+      "Symbol": "SCHF",
+      "Description": "SCHWAB INTERNATIONAL EQUITY ETF",
+      "Quantity": "85",
+      "Price": "$23.4958",
+      "Fees & Comm": "",
+      "Amount": "-$1,997.14"
+    }
+  ]
+}
+

@@ -263,3 +263,68 @@ class HabitCalendarEntry(BaseModel):
     date: date
     habit_types: List[str]  # List of habit types completed on this date
 
+
+# Portfolio schemas
+class PortfolioTransactionBase(BaseModel):
+    ticker: str
+    transaction_type: str  # "BUY" or "SELL"
+    transaction_date: date
+    quantity: float
+    price_per_unit: float
+    total_amount: float
+    fees: Optional[float] = 0.0
+    notes: Optional[str] = None
+    asset_type: str  # "STOCK", "ETF", or "MUTUAL_FUND"
+
+
+class PortfolioTransactionCreate(PortfolioTransactionBase):
+    pass
+
+
+class PortfolioTransactionUpdate(BaseModel):
+    ticker: Optional[str] = None
+    transaction_type: Optional[str] = None
+    transaction_date: Optional[date] = None
+    quantity: Optional[float] = None
+    price_per_unit: Optional[float] = None
+    total_amount: Optional[float] = None
+    fees: Optional[float] = None
+    notes: Optional[str] = None
+    asset_type: Optional[str] = None
+
+
+class PortfolioTransaction(PortfolioTransactionBase):
+    id: int
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class PortfolioTransactionBatchCreate(BaseModel):
+    """Batch upload multiple transactions from JSON"""
+    transactions: List[PortfolioTransactionCreate]
+
+
+class TickerHolding(BaseModel):
+    """Current holding information for a ticker"""
+    ticker: str
+    asset_type: str
+    total_quantity: float
+    average_cost: float
+    total_invested: float
+    current_price: Optional[float] = None
+    current_value: Optional[float] = None
+    profit_loss: Optional[float] = None
+    profit_loss_percentage: Optional[float] = None
+
+
+class PortfolioSummary(BaseModel):
+    """Overall portfolio summary"""
+    total_invested: float
+    current_value: Optional[float] = None
+    total_profit_loss: Optional[float] = None
+    total_profit_loss_percentage: Optional[float] = None
+    holdings: List[TickerHolding]
+    last_updated: Optional[datetime] = None
+
