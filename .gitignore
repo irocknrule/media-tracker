@@ -64,3 +64,6 @@ htmlcov/
 # Obsidian workout tracker
 obsidian/
 
+# Temporary test files
+test_exercise_images.html
+
