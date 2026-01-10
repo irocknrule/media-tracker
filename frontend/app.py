@@ -399,8 +399,13 @@ def main_app():
         st.session_state["selected_page"] = "Overview"
         st.experimental_set_query_params(category="Portfolio Tracker", page="Overview")
     
+    def switch_to_workout_tracker():
+        st.session_state["selected_category"] = "Workout Tracker"
+        st.session_state["selected_page"] = "Log Workout"
+        st.experimental_set_query_params(category="Workout Tracker", page="Log Workout")
+    
     # Top-level tabs using columns for better layout
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.button("📚 Media Tracker", use_container_width=True, 
                   type="primary" if st.session_state["selected_category"] == "Media Tracker" else "secondary", 
@@ -416,6 +421,11 @@ def main_app():
                   type="primary" if st.session_state["selected_category"] == "Portfolio Tracker" else "secondary", 
                   key="btn_portfolio_tracker",
                   on_click=switch_to_portfolio_tracker)
+    with col4:
+        st.button("💪 Workout Tracker", use_container_width=True, 
+                  type="primary" if st.session_state["selected_category"] == "Workout Tracker" else "secondary", 
+                  key="btn_workout_tracker",
+                  on_click=switch_to_workout_tracker)
     
     st.markdown("---")
     
@@ -492,6 +502,30 @@ def main_app():
                     page=page
                 )
     
+    # Workout Tracker sidebar
+    if st.session_state["selected_category"] == "Workout Tracker":
+        with st.sidebar:
+            st.markdown("### 💪 Workout Tracker")
+            st.markdown("---")
+            current_page = st.session_state.get("selected_page", "Log Workout")
+            page_options = ["Log Workout", "Workout History", "Exercises", "Workouts", "Progress", "Analytics"]
+            default_index = page_options.index(current_page) if current_page in page_options else 0
+            
+            page = st.radio(
+                "Select Option",
+                page_options,
+                index=default_index,
+                label_visibility="collapsed",
+                key="workout_tracker_page_radio"
+            )
+            
+            if page != current_page:
+                st.session_state["selected_page"] = page
+                st.experimental_set_query_params(
+                    category=st.session_state["selected_category"],
+                    page=page
+                )
+    
     # Main content routing - use persisted page from session state
     current_page = st.session_state.get("selected_page", page)
     if st.session_state["selected_category"] == "Media Tracker":
@@ -514,6 +548,19 @@ def main_app():
             calendar_tab()
         elif current_page == "Analytics":
             habit_analytics_tab()
+    elif st.session_state["selected_category"] == "Workout Tracker":
+        if current_page == "Log Workout":
+            log_workout_page()
+        elif current_page == "Workout History":
+            workout_history_page()
+        elif current_page == "Exercises":
+            exercises_page()
+        elif current_page == "Workouts":
+            workout_templates_page()
+        elif current_page == "Progress":
+            workout_progress_page()
+        elif current_page == "Analytics":
+            workout_analytics_page()
     else:  # Portfolio Tracker
         if current_page == "Overview":
             portfolio_overview_page()
@@ -4817,6 +4864,894 @@ def portfolio_allocation_page():
         st.error(f"Error loading allocation: {str(e)}")
         import traceback
         st.code(traceback.format_exc())
+
+
+# ============================================================================
+# WORKOUT TRACKER PAGES
+# ============================================================================
+
+def log_workout_page():
+    """Log a workout session"""
+    st.title("💪 Log Workout")
+    st.markdown("---")
+    
+    try:
+        # Get workout templates
+        templates_response = make_authenticated_request("GET", "/workouts/templates")
+        
+        if templates_response.status_code == 200:
+            templates = templates_response.json()
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                # Workout selection
+                workout_options = ["Custom Workout"] + [t["name"] for t in templates]
+                selected_workout = st.selectbox("Select Workout", workout_options)
+                
+                workout_id = None
+                exercises_list = []
+                
+                if selected_workout != "Custom Workout":
+                    # Get workout details
+                    workout = next(t for t in templates if t["name"] == selected_workout)
+                    workout_id = workout["id"]
+                    
+                    # Get full workout details with exercises
+                    workout_details_response = make_authenticated_request("GET", f"/workouts/templates/{workout_id}")
+                    if workout_details_response.status_code == 200:
+                        workout_details = workout_details_response.json()
+                        exercises_list = workout_details.get("exercises", [])
+                        
+                        st.info(f"**{selected_workout}** includes {len(exercises_list)} exercises")
+                        
+                        # Show last workout performance if available
+                        try:
+                            last_workout_response = make_authenticated_request("GET", f"/workouts/records/{workout_id}/last")
+                            if last_workout_response.status_code == 200:
+                                last_workout = last_workout_response.json()
+                                with st.expander("📊 View Last Workout Performance"):
+                                    st.caption(f"Last performed: {datetime.fromisoformat(last_workout['workout_date']).strftime('%B %d, %Y at %I:%M %p')}")
+                                    for ex_record in last_workout.get("exercises", []):
+                                        st.write(f"**{ex_record['exercise_name']}**: {ex_record.get('sets', '-')} sets × {ex_record.get('reps', '-')} reps @ {ex_record.get('weight', '-')} lbs")
+                        except:
+                            pass
+            
+            with col2:
+                workout_date = st.date_input("Workout Date", value=date.today())
+                workout_time = st.time_input("Workout Time", value=datetime.now().time())
+                duration = st.number_input("Duration (minutes)", min_value=0, value=60)
+            
+            st.markdown("---")
+            
+            # Exercise logging
+            st.subheader("📝 Log Exercises")
+            
+            # Get all exercises for selection
+            all_exercises_response = make_authenticated_request("GET", "/workouts/exercises")
+            if all_exercises_response.status_code == 200:
+                all_exercises = all_exercises_response.json()
+                
+                # Initialize session state for exercise records
+                if "workout_exercises" not in st.session_state:
+                    st.session_state.workout_exercises = []
+                
+                # Track the currently selected workout to detect changes
+                if "current_workout" not in st.session_state:
+                    st.session_state.current_workout = None
+                
+                # Check if workout selection has changed
+                if st.session_state.current_workout != selected_workout:
+                    st.session_state.current_workout = selected_workout
+                    st.session_state.workout_exercises = []
+                    
+                    # Pre-populate with workout template exercises if any
+                    if exercises_list:
+                        for ex in exercises_list:
+                            st.session_state.workout_exercises.append({
+                                "exercise_id": ex["exercise_id"],
+                                "exercise_name": ex["exercise_name"],
+                                "sets": 3,
+                                "reps": 10,
+                                "weight": 0.0
+                            })
+                
+                # Display current exercises
+                for idx, ex_record in enumerate(st.session_state.workout_exercises):
+                    with st.container():
+                        col1, col2, col3, col4, col5, col6 = st.columns([3, 1, 1, 1, 1, 1])
+                        
+                        with col1:
+                            st.write(f"**{ex_record['exercise_name']}**")
+                        with col2:
+                            sets = st.number_input("Sets", min_value=1, value=ex_record.get("sets", 3), key=f"sets_{idx}")
+                            st.session_state.workout_exercises[idx]["sets"] = sets
+                        with col3:
+                            reps = st.number_input("Reps", min_value=1, value=ex_record.get("reps", 10), key=f"reps_{idx}")
+                            st.session_state.workout_exercises[idx]["reps"] = reps
+                        with col4:
+                            weight = st.number_input("Weight (lbs)", min_value=0.0, value=float(ex_record.get("weight", 0)), step=2.5, key=f"weight_{idx}")
+                            st.session_state.workout_exercises[idx]["weight"] = weight
+                        with col5:
+                            st.write("")  # Spacing
+                            st.write("")  # Spacing
+                            if st.button("❌", key=f"remove_{idx}"):
+                                st.session_state.workout_exercises.pop(idx)
+                                st.rerun()
+                
+                # Add exercise button
+                st.markdown("---")
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    exercise_to_add = st.selectbox(
+                        "Add Exercise",
+                        options=all_exercises,
+                        format_func=lambda x: f"{x['name']} ({x.get('primary_muscle', 'N/A')})",
+                        key="exercise_select"
+                    )
+                with col2:
+                    st.write("")  # Spacing
+                    st.write("")  # Spacing
+                    if st.button("➕ Add"):
+                        st.session_state.workout_exercises.append({
+                            "exercise_id": exercise_to_add["id"],
+                            "exercise_name": exercise_to_add["name"],
+                            "sets": 3,
+                            "reps": 10,
+                            "weight": 0.0
+                        })
+                        st.rerun()
+                
+                # Submit workout
+                st.markdown("---")
+                notes = st.text_area("Workout Notes (optional)")
+                
+                if st.button("💾 Save Workout", type="primary", use_container_width=True):
+                    if len(st.session_state.workout_exercises) == 0:
+                        st.error("Please add at least one exercise!")
+                    else:
+                        try:
+                            workout_datetime = datetime.combine(workout_date, workout_time)
+                            
+                            workout_data = {
+                                "workout_id": workout_id,
+                                "workout_name": selected_workout,
+                                "workout_date": workout_datetime.isoformat(),
+                                "duration_minutes": duration,
+                                "notes": notes if notes else None,
+                                "exercises": [
+                                    {
+                                        "exercise_id": ex["exercise_id"],
+                                        "sets": ex["sets"],
+                                        "reps": ex["reps"],
+                                        "weight": ex["weight"],
+                                        "weight_unit": "lbs"
+                                    }
+                                    for ex in st.session_state.workout_exercises
+                                ]
+                            }
+                            
+                            response = make_authenticated_request("POST", "/workouts/records", json=workout_data)
+                            
+                            if response.status_code == 201:
+                                st.success("✅ Workout logged successfully!")
+                                # Clear session state to reset the form
+                                st.session_state.workout_exercises = []
+                                st.session_state.current_workout = None
+                                st.balloons()
+                                # Small delay before rerun to show success message
+                                import time
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error(f"Failed to log workout: {response.text}")
+                        
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+        
+        else:
+            st.error("Failed to load workout templates")
+    
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot connect to API. Make sure the backend is running.")
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+
+
+def workout_history_page():
+    """View workout history"""
+    st.title("📅 Workout History")
+    st.markdown("---")
+    
+    try:
+        # Date range filter
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            start_date = st.date_input("From", value=date.today() - timedelta(days=90))
+        with col2:
+            end_date = st.date_input("To", value=date.today())
+        with col3:
+            st.write("")  # Spacing
+            st.write("")  # Spacing
+            if st.button("🔄 Refresh"):
+                st.rerun()
+        
+        # Get workout records
+        params = {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat()
+        }
+        
+        response = make_authenticated_request("GET", "/workouts/records", params=params)
+        
+        if response.status_code == 200:
+            records = response.json()
+            
+            if records:
+                st.success(f"Found {len(records)} workouts")
+                
+                for record in records:
+                    workout_date = datetime.fromisoformat(record["workout_date"])
+                    
+                    with st.expander(f"**{record['workout_name']}** - {workout_date.strftime('%B %d, %Y at %I:%M %p')}"):
+                        if record.get("duration_minutes"):
+                            st.caption(f"Duration: {record['duration_minutes']} minutes")
+                        
+                        if record.get("notes"):
+                            st.info(f"Notes: {record['notes']}")
+                        
+                        st.markdown("### Exercises")
+                        for ex_record in record.get("exercises", []):
+                            col1, col2 = st.columns([3, 2])
+                            with col1:
+                                st.write(f"**{ex_record['exercise_name']}**")
+                            with col2:
+                                if ex_record.get("sets") and ex_record.get("reps") and ex_record.get("weight"):
+                                    st.write(f"{ex_record['sets']} × {ex_record['reps']} @ {ex_record['weight']} lbs")
+                                elif ex_record.get("time_seconds"):
+                                    st.write(f"{ex_record['time_seconds']//60} min")
+                        
+                        # Delete button
+                        if st.button(f"🗑️ Delete Workout", key=f"delete_{record['id']}"):
+                            delete_response = make_authenticated_request("DELETE", f"/workouts/records/{record['id']}")
+                            if delete_response.status_code == 204:
+                                st.success("Workout deleted!")
+                                st.rerun()
+                            else:
+                                st.error("Failed to delete workout")
+            else:
+                st.info("No workouts found in the selected date range.")
+        
+        else:
+            st.error(f"Failed to load workout history: {response.text}")
+    
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot connect to API. Make sure the backend is running.")
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+
+
+def exercises_page():
+    """Manage exercises"""
+    st.title("🏋️ Exercise Library")
+    st.markdown("---")
+    
+    tab1, tab2 = st.tabs(["View Exercises", "Add Exercise"])
+    
+    with tab1:
+        st.subheader("Your Exercises")
+        
+        # Search and filter
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            search_term = st.text_input("Search exercises", placeholder="Enter exercise name...")
+        with col2:
+            muscle_filter = st.selectbox("Filter by muscle", ["All", "Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Glutes", "Upper Back"])
+        
+        try:
+            params = {}
+            if search_term:
+                params["search"] = search_term
+            if muscle_filter != "All":
+                params["muscle"] = muscle_filter
+            
+            response = make_authenticated_request("GET", "/workouts/exercises", params=params)
+            
+            if response.status_code == 200:
+                exercises = response.json()
+                
+                if exercises:
+                    st.success(f"Found {len(exercises)} exercises")
+                    
+                    # Display exercises in a grid
+                    for exercise in exercises:
+                        with st.container():
+                            # Use expander to show exercise details
+                            with st.expander(f"**{exercise['name']}** ({exercise.get('primary_muscle', 'N/A')})", expanded=False):
+                                col1, col2 = st.columns([1, 2])
+                                
+                                with col1:
+                                    # Display exercise GIF/image
+                                    if exercise.get("image_url"):
+                                        try:
+                                            st.image(exercise['image_url'], width=300, caption=exercise['name'])
+                                        except:
+                                            st.info("🖼️ Image available (click to view)")
+                                            st.caption(f"[View Image]({exercise['image_url']})")
+                                    else:
+                                        st.warning("⚠️ No image available")
+                                
+                                with col2:
+                                    st.markdown("### Details")
+                                    
+                                    if exercise.get("primary_muscle"):
+                                        st.write(f"**Primary Muscle:** {exercise['primary_muscle']}")
+                                    
+                                    if exercise.get("secondary_muscles"):
+                                        st.write(f"**Secondary Muscles:** {exercise['secondary_muscles']}")
+                                    
+                                    if exercise.get("notes"):
+                                        st.markdown("**Notes:**")
+                                        st.write(exercise["notes"])
+                                    
+                                    # Action buttons
+                                    col_edit, col_delete = st.columns(2)
+                                    
+                                    with col_edit:
+                                        if st.button("✏️ Edit", key=f"edit_ex_{exercise['id']}", use_container_width=True):
+                                            st.session_state[f"editing_exercise_{exercise['id']}"] = True
+                                            st.rerun()
+                                    
+                                    with col_delete:
+                                        if st.button("🗑️ Delete", key=f"delete_ex_{exercise['id']}", use_container_width=True):
+                                            delete_response = make_authenticated_request("DELETE", f"/workouts/exercises/{exercise['id']}")
+                                            if delete_response.status_code == 204:
+                                                st.success("Exercise deleted!")
+                                                st.rerun()
+                                            else:
+                                                st.error("Failed to delete")
+                                
+                                # Edit form (shown inline when edit button is clicked)
+                                if st.session_state.get(f"editing_exercise_{exercise['id']}", False):
+                                    st.markdown("---")
+                                    with st.form(key=f"edit_form_{exercise['id']}"):
+                                        st.markdown("### Edit Exercise")
+                                        edit_name = st.text_input("Name", value=exercise['name'], key=f"edit_name_{exercise['id']}")
+                                        edit_primary = st.selectbox(
+                                            "Primary Muscle",
+                                            ["", "Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Glutes", "Upper Back", "Lower Back", "Hamstrings", "Quadriceps", "Calves", "Biceps", "Triceps", "Forearms"],
+                                            index=(["", "Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Glutes", "Upper Back", "Lower Back", "Hamstrings", "Quadriceps", "Calves", "Biceps", "Triceps", "Forearms"].index(exercise.get('primary_muscle', '')) if exercise.get('primary_muscle') in ["", "Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Glutes", "Upper Back", "Lower Back", "Hamstrings", "Quadriceps", "Calves", "Biceps", "Triceps", "Forearms"] else 0),
+                                            key=f"edit_primary_{exercise['id']}"
+                                        )
+                                        edit_image_url = st.text_input("Image URL (optional)", value=exercise.get('image_url', ''), placeholder="https://example.com/exercise.gif", key=f"edit_image_{exercise['id']}")
+                                        edit_notes = st.text_area("Notes", value=exercise.get('notes', ''), key=f"edit_notes_{exercise['id']}")
+                                        
+                                        col_save, col_cancel = st.columns(2)
+                                        with col_save:
+                                            save_button = st.form_submit_button("💾 Save", type="primary", use_container_width=True)
+                                        with col_cancel:
+                                            cancel_button = st.form_submit_button("❌ Cancel", use_container_width=True)
+                                        
+                                        if save_button:
+                                            update_data = {
+                                                "name": edit_name,
+                                                "primary_muscle": edit_primary if edit_primary else None,
+                                                "notes": edit_notes if edit_notes else None,
+                                                "image_url": edit_image_url if edit_image_url else None
+                                            }
+                                            
+                                            update_response = make_authenticated_request("PUT", f"/workouts/exercises/{exercise['id']}", json=update_data)
+                                            
+                                            if update_response.status_code == 200:
+                                                st.success("✅ Exercise updated!")
+                                                st.session_state[f"editing_exercise_{exercise['id']}"] = False
+                                                st.rerun()
+                                            else:
+                                                st.error(f"Failed to update: {update_response.text}")
+                                        
+                                        if cancel_button:
+                                            st.session_state[f"editing_exercise_{exercise['id']}"] = False
+                                            st.rerun()
+                else:
+                    st.info("No exercises found. Add some exercises to get started!")
+            
+            else:
+                st.error(f"Failed to load exercises: {response.text}")
+        
+        except requests.exceptions.ConnectionError:
+            st.error("Cannot connect to API. Make sure the backend is running.")
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+    
+    with tab2:
+        st.subheader("Add New Exercise")
+        
+        with st.form("add_exercise_form"):
+            name = st.text_input("Exercise Name*", placeholder="e.g., Barbell Squat")
+            primary_muscle = st.selectbox("Primary Muscle Group", ["", "Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Glutes", "Upper Back", "Lower Back", "Hamstrings", "Quadriceps", "Calves", "Biceps", "Triceps", "Forearms"])
+            secondary_muscles = st.text_input("Secondary Muscles (comma-separated)", placeholder="e.g., Core, Lower Back")
+            notes = st.text_area("Notes / Form Cues", placeholder="Tips for proper form...")
+            
+            submitted = st.form_submit_button("Add Exercise", type="primary", use_container_width=True)
+            
+            if submitted:
+                if not name:
+                    st.error("Please enter an exercise name")
+                else:
+                    try:
+                        exercise_data = {
+                            "name": name,
+                            "primary_muscle": primary_muscle if primary_muscle else None,
+                            "secondary_muscles": secondary_muscles if secondary_muscles else None,
+                            "notes": notes if notes else None
+                        }
+                        
+                        response = make_authenticated_request("POST", "/workouts/exercises", json=exercise_data)
+                        
+                        if response.status_code == 201:
+                            st.success(f"✅ Exercise '{name}' added successfully!")
+                            st.rerun()
+                        elif response.status_code == 400:
+                            st.error(f"Exercise already exists: {response.json().get('detail', '')}")
+                        else:
+                            st.error(f"Failed to add exercise: {response.text}")
+                    
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
+
+
+def workout_templates_page():
+    """Manage workout templates"""
+    st.title("📋 Workout Templates")
+    st.markdown("---")
+    
+    tab1, tab2 = st.tabs(["View Workouts", "Create Workout"])
+    
+    with tab1:
+        st.subheader("Your Workout Templates")
+        
+        try:
+            response = make_authenticated_request("GET", "/workouts/templates")
+            
+            if response.status_code == 200:
+                workouts = response.json()
+                
+                if workouts:
+                    # Initialize edit mode tracking in session state
+                    if "editing_workout_id" not in st.session_state:
+                        st.session_state.editing_workout_id = None
+                    
+                    for workout in workouts:
+                        # Get full workout details
+                        details_response = make_authenticated_request("GET", f"/workouts/templates/{workout['id']}")
+                        if details_response.status_code == 200:
+                            workout_details = details_response.json()
+                            
+                            # Check if this workout is being edited
+                            is_editing = st.session_state.editing_workout_id == workout['id']
+                            
+                            with st.expander(f"**{workout['name']}** ({len(workout_details.get('exercises', []))} exercises)", expanded=is_editing):
+                                if not is_editing:
+                                    # View mode
+                                    if workout.get("description"):
+                                        st.info(workout["description"])
+                                    
+                                    st.markdown("### Exercises")
+                                    for ex in workout_details.get("exercises", []):
+                                        st.write(f"- {ex['exercise_name']} ({ex.get('primary_muscle', 'N/A')})")
+                                    
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        if st.button(f"✏️ Edit", key=f"edit_workout_{workout['id']}"):
+                                            st.session_state.editing_workout_id = workout['id']
+                                            st.rerun()
+                                    with col2:
+                                        if st.button(f"🗑️ Delete", key=f"delete_workout_{workout['id']}"):
+                                            delete_response = make_authenticated_request("DELETE", f"/workouts/templates/{workout['id']}")
+                                            if delete_response.status_code == 204:
+                                                st.success("Workout template deleted!")
+                                                st.rerun()
+                                            else:
+                                                st.error("Failed to delete")
+                                
+                                else:
+                                    # Edit mode
+                                    st.markdown("### Edit Workout")
+                                    
+                                    # Get all exercises for selection
+                                    exercises_response = make_authenticated_request("GET", "/workouts/exercises")
+                                    if exercises_response.status_code == 200:
+                                        all_exercises = exercises_response.json()
+                                        
+                                        # Edit form
+                                        edit_name = st.text_input(
+                                            "Workout Name*",
+                                            value=workout['name'],
+                                            key=f"edit_name_{workout['id']}"
+                                        )
+                                        
+                                        edit_description = st.text_area(
+                                            "Description (optional)",
+                                            value=workout.get('description', ''),
+                                            key=f"edit_desc_{workout['id']}"
+                                        )
+                                        
+                                        st.markdown("### Edit Exercises")
+                                        
+                                        # Get currently selected exercise IDs
+                                        current_exercise_ids = [ex['exercise_id'] for ex in workout_details.get('exercises', [])]
+                                        
+                                        # Pre-select current exercises
+                                        default_exercises = [ex for ex in all_exercises if ex['id'] in current_exercise_ids]
+                                        
+                                        selected_exercises = st.multiselect(
+                                            "Choose exercises for this workout",
+                                            options=all_exercises,
+                                            default=default_exercises,
+                                            format_func=lambda x: f"{x['name']} ({x.get('primary_muscle', 'N/A')})",
+                                            key=f"edit_exercises_{workout['id']}"
+                                        )
+                                        
+                                        # Action buttons
+                                        col1, col2 = st.columns(2)
+                                        with col1:
+                                            if st.button("💾 Save Changes", type="primary", key=f"save_workout_{workout['id']}"):
+                                                if not edit_name:
+                                                    st.error("Please enter a workout name")
+                                                elif len(selected_exercises) == 0:
+                                                    st.error("Please select at least one exercise")
+                                                else:
+                                                    try:
+                                                        update_data = {
+                                                            "name": edit_name,
+                                                            "description": edit_description if edit_description else None,
+                                                            "exercise_ids": [ex["id"] for ex in selected_exercises]
+                                                        }
+                                                        
+                                                        update_response = make_authenticated_request(
+                                                            "PUT",
+                                                            f"/workouts/templates/{workout['id']}",
+                                                            json=update_data
+                                                        )
+                                                        
+                                                        if update_response.status_code == 200:
+                                                            st.success(f"✅ Workout '{edit_name}' updated successfully!")
+                                                            st.session_state.editing_workout_id = None
+                                                            st.rerun()
+                                                        elif update_response.status_code == 400:
+                                                            st.error(f"Error: {update_response.json().get('detail', '')}")
+                                                        else:
+                                                            st.error(f"Failed to update workout: {update_response.text}")
+                                                    
+                                                    except Exception as e:
+                                                        st.error(f"Error: {str(e)}")
+                                        
+                                        with col2:
+                                            if st.button("❌ Cancel", key=f"cancel_edit_{workout['id']}"):
+                                                st.session_state.editing_workout_id = None
+                                                st.rerun()
+                else:
+                    st.info("No workout templates found. Create one to get started!")
+            
+            else:
+                st.error(f"Failed to load workouts: {response.text}")
+        
+        except requests.exceptions.ConnectionError:
+            st.error("Cannot connect to API. Make sure the backend is running.")
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+    
+    with tab2:
+        st.subheader("Create New Workout Template")
+        
+        # Get all exercises
+        try:
+            exercises_response = make_authenticated_request("GET", "/workouts/exercises")
+            
+            if exercises_response.status_code == 200:
+                all_exercises = exercises_response.json()
+                
+                name = st.text_input("Workout Name*", placeholder="e.g., Upper Body Push")
+                description = st.text_area("Description (optional)", placeholder="Workout notes...")
+                
+                st.markdown("### Select Exercises")
+                selected_exercises = st.multiselect(
+                    "Choose exercises for this workout",
+                    options=all_exercises,
+                    format_func=lambda x: f"{x['name']} ({x.get('primary_muscle', 'N/A')})"
+                )
+                
+                if st.button("Create Workout", type="primary", use_container_width=True):
+                    if not name:
+                        st.error("Please enter a workout name")
+                    elif len(selected_exercises) == 0:
+                        st.error("Please select at least one exercise")
+                    else:
+                        try:
+                            workout_data = {
+                                "name": name,
+                                "description": description if description else None,
+                                "exercise_ids": [ex["id"] for ex in selected_exercises]
+                            }
+                            
+                            response = make_authenticated_request("POST", "/workouts/templates", json=workout_data)
+                            
+                            if response.status_code == 201:
+                                st.success(f"✅ Workout '{name}' created successfully!")
+                                st.rerun()
+                            elif response.status_code == 400:
+                                st.error(f"Workout already exists: {response.json().get('detail', '')}")
+                            else:
+                                st.error(f"Failed to create workout: {response.text}")
+                        
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+            
+            else:
+                st.error("Failed to load exercises")
+        
+        except requests.exceptions.ConnectionError:
+            st.error("Cannot connect to API. Make sure the backend is running.")
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+
+
+def workout_progress_page():
+    """View progress for specific exercises"""
+    st.title("📈 Exercise Progress")
+    st.markdown("---")
+    
+    try:
+        # Get all exercises
+        exercises_response = make_authenticated_request("GET", "/workouts/exercises")
+        
+        if exercises_response.status_code == 200:
+            exercises = exercises_response.json()
+            
+            if exercises:
+                selected_exercise = st.selectbox(
+                    "Select Exercise",
+                    options=exercises,
+                    format_func=lambda x: f"{x['name']} ({x.get('primary_muscle', 'N/A')})"
+                )
+                
+                # Date range
+                col1, col2 = st.columns(2)
+                with col1:
+                    start_date = st.date_input("From", value=date.today() - timedelta(days=90))
+                with col2:
+                    end_date = st.date_input("To", value=date.today())
+                
+                # Get progress data
+                params = {
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat()
+                }
+                
+                progress_response = make_authenticated_request(
+                    "GET",
+                    f"/workouts/exercises/{selected_exercise['id']}/progress",
+                    params=params
+                )
+                
+                if progress_response.status_code == 200:
+                    progress = progress_response.json()
+                    
+                    # Display PRs
+                    st.markdown("### 🏆 Personal Records")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        pr_weight = progress.get("personal_record_weight")
+                        st.metric("Max Weight", f"{pr_weight:.1f} lbs" if pr_weight else "N/A")
+                    with col2:
+                        pr_reps = progress.get("personal_record_reps")
+                        st.metric("Max Reps", f"{pr_reps}" if pr_reps else "N/A")
+                    with col3:
+                        pr_volume = progress.get("personal_record_volume")
+                        st.metric("Max Volume", f"{pr_volume:.0f}" if pr_volume else "N/A")
+                    
+                    # History table
+                    st.markdown("### 📊 History")
+                    history = progress.get("history", [])
+                    
+                    if history:
+                        import pandas as pd
+                        
+                        # Create DataFrame
+                        df = pd.DataFrame([
+                            {
+                                "Date": datetime.fromisoformat(h["date"]).strftime("%Y-%m-%d"),
+                                "Sets": h.get("sets", "-"),
+                                "Reps": h.get("reps", "-"),
+                                "Weight": f"{h.get('weight', '-')} lbs" if h.get("weight") else "-",
+                                "Volume": f"{h.get('volume', '-'):.0f}" if h.get("volume") else "-",
+                                "Est. 1RM": f"{h.get('one_rep_max', '-'):.1f} lbs" if h.get("one_rep_max") else "-"
+                            }
+                            for h in history
+                        ])
+                        
+                        st.dataframe(df, use_container_width=True)
+                        
+                        # Charts with plotly
+                        try:
+                            import plotly.graph_objects as go
+                            
+                            dates = [datetime.fromisoformat(h["date"]) for h in history]
+                            weights = [h.get("weight") for h in history if h.get("weight")]
+                            volumes = [h.get("volume") for h in history if h.get("volume")]
+                            
+                            if weights and len(weights) > 1:
+                                st.markdown("### 📉 Weight Progression")
+                                fig = go.Figure()
+                                fig.add_trace(go.Scatter(
+                                    x=[datetime.fromisoformat(h["date"]) for h in history if h.get("weight")],
+                                    y=weights,
+                                    mode='lines+markers',
+                                    name='Weight'
+                                ))
+                                fig.update_layout(xaxis_title="Date", yaxis_title="Weight (lbs)")
+                                st.plotly_chart(fig, use_container_width=True)
+                            
+                            if volumes and len(volumes) > 1:
+                                st.markdown("### 📉 Volume Progression")
+                                fig = go.Figure()
+                                fig.add_trace(go.Scatter(
+                                    x=[datetime.fromisoformat(h["date"]) for h in history if h.get("volume")],
+                                    y=volumes,
+                                    mode='lines+markers',
+                                    name='Volume',
+                                    line=dict(color='green')
+                                ))
+                                fig.update_layout(xaxis_title="Date", yaxis_title="Volume (sets × reps × weight)")
+                                st.plotly_chart(fig, use_container_width=True)
+                        
+                        except ImportError:
+                            st.info("Install plotly for charts: pip install plotly")
+                    
+                    else:
+                        st.info("No history found for this exercise in the selected date range.")
+                
+                else:
+                    st.error(f"Failed to load progress: {progress_response.text}")
+            
+            else:
+                st.info("No exercises found. Add some exercises first!")
+        
+        else:
+            st.error("Failed to load exercises")
+    
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot connect to API. Make sure the backend is running.")
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+
+
+def workout_analytics_page():
+    """Workout analytics and insights"""
+    st.title("📊 Workout Analytics")
+    st.markdown("---")
+    
+    try:
+        # Date range filter
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input("From", value=date.today() - timedelta(days=90))
+        with col2:
+            end_date = st.date_input("To", value=date.today())
+        
+        params = {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat()
+        }
+        
+        # Get analytics summary
+        analytics_response = make_authenticated_request("GET", "/workouts/analytics/summary", params=params)
+        
+        if analytics_response.status_code == 200:
+            analytics = analytics_response.json()
+            
+            # Key metrics
+            st.markdown("### 📈 Key Metrics")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Total Workouts", analytics.get("total_workouts", 0))
+            with col2:
+                st.metric("Exercises Logged", analytics.get("total_exercises_logged", 0))
+            with col3:
+                st.metric("Unique Exercises", analytics.get("unique_exercises", 0))
+            with col4:
+                total_volume = analytics.get("total_volume", 0)
+                st.metric("Total Volume", f"{total_volume:,.0f} lbs")
+            
+            st.markdown("---")
+            
+            # Most frequent exercises
+            st.markdown("### 🏆 Most Frequent Exercises")
+            most_frequent = analytics.get("most_frequent_exercises", [])
+            
+            if most_frequent:
+                import pandas as pd
+                df = pd.DataFrame(most_frequent)
+                st.dataframe(df, use_container_width=True)
+            else:
+                st.info("No data available yet.")
+            
+            # Workout frequency by month
+            st.markdown("### 📅 Workout Frequency by Month")
+            frequency_data = analytics.get("workout_frequency_by_month", [])
+            
+            if frequency_data:
+                try:
+                    import plotly.graph_objects as go
+                    
+                    months = [d["month"] for d in frequency_data]
+                    counts = [d["count"] for d in frequency_data]
+                    
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(x=months, y=counts, name="Workouts"))
+                    fig.update_layout(xaxis_title="Month", yaxis_title="Number of Workouts")
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                except ImportError:
+                    st.info("Install plotly for charts")
+            else:
+                st.info("No data available yet.")
+            
+            # Muscle group distribution
+            st.markdown("### 💪 Muscle Group Distribution")
+            muscle_dist = analytics.get("muscle_group_distribution", {})
+            
+            if muscle_dist:
+                try:
+                    import plotly.graph_objects as go
+                    
+                    labels = list(muscle_dist.keys())
+                    values = list(muscle_dist.values())
+                    
+                    fig = go.Figure(data=[go.Pie(labels=labels, values=values)])
+                    fig.update_layout(title="Exercises by Muscle Group")
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                except ImportError:
+                    st.info("Install plotly for charts")
+            else:
+                st.info("No data available yet.")
+            
+            # Personal records
+            st.markdown("---")
+            st.markdown("### 🏅 Personal Records")
+            
+            prs_response = make_authenticated_request("GET", "/workouts/analytics/personal-records")
+            
+            if prs_response.status_code == 200:
+                prs = prs_response.json()
+                
+                if prs:
+                    import pandas as pd
+                    
+                    df = pd.DataFrame([
+                        {
+                            "Exercise": pr["exercise_name"],
+                            "Muscle": pr.get("primary_muscle", "N/A"),
+                            "Max Weight": f"{pr.get('max_weight', 0):.1f} lbs" if pr.get("max_weight") else "-",
+                            "Max Reps": pr.get("max_reps", "-"),
+                            "Max Volume": f"{pr.get('max_volume', 0):.0f}" if pr.get("max_volume") else "-"
+                        }
+                        for pr in prs
+                    ])
+                    
+                    st.dataframe(df, use_container_width=True)
+                else:
+                    st.info("No personal records yet. Start logging workouts!")
+        
+        else:
+            st.error(f"Failed to load analytics: {analytics_response.text}")
+    
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot connect to API. Make sure the backend is running.")
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
 
 
 # Main app logic

@@ -141,3 +141,94 @@ class TickerCategory(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+# Workout Tracking Models
+
+class Exercise(Base):
+    __tablename__ = "exercises"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True, index=True)
+    primary_muscle = Column(String, index=True)  # e.g., "Glutes", "Chest", "Upper Back"
+    secondary_muscles = Column(String)  # JSON or comma-separated list
+    notes = Column(String)  # Form cues, instructions, etc.
+    image_url = Column(String)  # URL or path to exercise image/GIF
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    exercise_records = relationship("ExerciseRecord", back_populates="exercise")
+    workout_exercises = relationship("WorkoutExercise", back_populates="exercise", cascade="all, delete-orphan")
+
+
+class Workout(Base):
+    __tablename__ = "workouts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True, index=True)
+    description = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    exercises = relationship("WorkoutExercise", back_populates="workout", cascade="all, delete-orphan")
+    workout_records = relationship("WorkoutRecord", back_populates="workout")
+
+
+class WorkoutExercise(Base):
+    """Junction table to maintain exercise order in workouts"""
+    __tablename__ = "workout_exercises"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    workout_id = Column(Integer, ForeignKey("workouts.id"), nullable=False, index=True)
+    exercise_id = Column(Integer, ForeignKey("exercises.id"), nullable=False, index=True)
+    order_index = Column(Integer, nullable=False)  # To maintain exercise order
+    notes = Column(String)  # Specific notes for this exercise in this workout
+    
+    # Relationships
+    workout = relationship("Workout", back_populates="exercises")
+    exercise = relationship("Exercise", back_populates="workout_exercises")
+
+
+class WorkoutRecord(Base):
+    __tablename__ = "workout_records"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    workout_id = Column(Integer, ForeignKey("workouts.id"), nullable=True, index=True)  # Nullable for ad-hoc workouts
+    workout_name = Column(String, index=True)  # Store name for reference (even if ad-hoc)
+    workout_date = Column(DateTime, nullable=False, index=True)
+    duration_minutes = Column(Integer)  # Optional workout duration
+    notes = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    workout = relationship("Workout", back_populates="workout_records")
+    exercise_records = relationship("ExerciseRecord", back_populates="workout_record", cascade="all, delete-orphan")
+
+
+class ExerciseRecord(Base):
+    __tablename__ = "exercise_records"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    workout_record_id = Column(Integer, ForeignKey("workout_records.id"), nullable=False, index=True)
+    exercise_id = Column(Integer, ForeignKey("exercises.id"), nullable=False, index=True)
+    exercise_name = Column(String, index=True)  # Store name for reference
+    
+    # Performance metrics
+    sets = Column(Integer)
+    reps = Column(Integer)
+    weight = Column(Float)
+    weight_unit = Column(String, default="lbs")  # "lbs" or "kg"
+    
+    # For cardio exercises
+    time_seconds = Column(Integer)  # Duration in seconds
+    distance = Column(Float)  # Distance covered
+    distance_unit = Column(String)  # "mi", "km", "m"
+    
+    notes = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    workout_record = relationship("WorkoutRecord", back_populates="exercise_records")
+    exercise = relationship("Exercise", back_populates="exercise_records")
+

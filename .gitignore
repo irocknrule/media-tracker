@@ -61,3 +61,6 @@ Thumbs.db
 .coverage
 htmlcov/
 
+# Obsidian workout tracker
+obsidian/
+

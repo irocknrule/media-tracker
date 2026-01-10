@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.routers import auth, movies, tv_shows, books, music, analytics, search, habits, portfolio, allocation
+from backend.routers import auth, movies, tv_shows, books, music, analytics, search, habits, portfolio, allocation, workouts
 import warnings
 import logging
 
@@ -35,6 +35,7 @@ app.include_router(search.router)
 app.include_router(habits.router)
 app.include_router(portfolio.router)
 app.include_router(allocation.router)
+app.include_router(workouts.router)
 
 
 @app.get("/")

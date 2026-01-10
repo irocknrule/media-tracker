@@ -415,3 +415,204 @@ class AssetAllocationSummary(BaseModel):
     categories: List[AllocationCategorySummary]
     last_updated: Optional[datetime] = None
 
+
+# Workout Tracking schemas
+
+class ExerciseBase(BaseModel):
+    """Base schema for exercise"""
+    name: str
+    primary_muscle: Optional[str] = None
+    secondary_muscles: Optional[str] = None  # JSON or comma-separated
+    notes: Optional[str] = None
+    image_url: Optional[str] = None
+
+
+class ExerciseCreate(ExerciseBase):
+    """Schema for creating an exercise"""
+    pass
+
+
+class ExerciseUpdate(BaseModel):
+    """Schema for updating an exercise"""
+    name: Optional[str] = None
+    primary_muscle: Optional[str] = None
+    secondary_muscles: Optional[str] = None
+    notes: Optional[str] = None
+    image_url: Optional[str] = None
+
+
+class Exercise(ExerciseBase):
+    """Schema for exercise response"""
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class WorkoutExerciseBase(BaseModel):
+    """Base schema for workout-exercise relationship"""
+    exercise_id: int
+    order_index: int
+    notes: Optional[str] = None
+
+
+class WorkoutExerciseCreate(WorkoutExerciseBase):
+    """Schema for adding exercise to workout"""
+    pass
+
+
+class WorkoutExerciseDetail(BaseModel):
+    """Detailed workout-exercise with exercise info"""
+    id: int
+    exercise_id: int
+    exercise_name: str
+    primary_muscle: Optional[str] = None
+    order_index: int
+    notes: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class WorkoutBase(BaseModel):
+    """Base schema for workout"""
+    name: str
+    description: Optional[str] = None
+
+
+class WorkoutCreate(BaseModel):
+    """Schema for creating a workout with exercises"""
+    name: str
+    description: Optional[str] = None
+    exercise_ids: List[int] = []  # List of exercise IDs in order
+
+
+class WorkoutUpdate(BaseModel):
+    """Schema for updating a workout"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    exercise_ids: Optional[List[int]] = None  # Update exercise list
+
+
+class Workout(WorkoutBase):
+    """Schema for workout response"""
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class WorkoutWithExercises(Workout):
+    """Workout response with exercise details"""
+    exercises: List[WorkoutExerciseDetail] = []
+    
+    class Config:
+        from_attributes = True
+
+
+class ExerciseRecordBase(BaseModel):
+    """Base schema for exercise record"""
+    exercise_id: int
+    sets: Optional[int] = None
+    reps: Optional[int] = None
+    weight: Optional[float] = None
+    weight_unit: Optional[str] = "lbs"
+    time_seconds: Optional[int] = None
+    distance: Optional[float] = None
+    distance_unit: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ExerciseRecordCreate(ExerciseRecordBase):
+    """Schema for creating an exercise record"""
+    pass
+
+
+class ExerciseRecord(ExerciseRecordBase):
+    """Schema for exercise record response"""
+    id: int
+    workout_record_id: int
+    exercise_name: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class WorkoutRecordBase(BaseModel):
+    """Base schema for workout record"""
+    workout_id: Optional[int] = None  # Nullable for ad-hoc workouts
+    workout_name: str
+    workout_date: datetime
+    duration_minutes: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class WorkoutRecordCreate(BaseModel):
+    """Schema for creating a workout record with exercises"""
+    workout_id: Optional[int] = None
+    workout_name: str
+    workout_date: datetime
+    duration_minutes: Optional[int] = None
+    notes: Optional[str] = None
+    exercises: List[ExerciseRecordCreate] = []
+
+
+class WorkoutRecordUpdate(BaseModel):
+    """Schema for updating a workout record"""
+    workout_date: Optional[datetime] = None
+    duration_minutes: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class WorkoutRecord(WorkoutRecordBase):
+    """Schema for workout record response"""
+    id: int
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class WorkoutRecordWithExercises(WorkoutRecord):
+    """Workout record with exercise details"""
+    exercises: List[ExerciseRecord] = []
+    
+    class Config:
+        from_attributes = True
+
+
+class ExerciseProgressEntry(BaseModel):
+    """Single entry for exercise progress tracking"""
+    date: datetime
+    sets: Optional[int] = None
+    reps: Optional[int] = None
+    weight: Optional[float] = None
+    volume: Optional[float] = None  # sets * reps * weight
+    one_rep_max: Optional[float] = None  # Estimated 1RM
+
+
+class ExerciseProgress(BaseModel):
+    """Progress tracking for an exercise"""
+    exercise_id: int
+    exercise_name: str
+    history: List[ExerciseProgressEntry] = []
+    personal_record_weight: Optional[float] = None
+    personal_record_volume: Optional[float] = None
+    personal_record_reps: Optional[int] = None
+
+
+class WorkoutAnalytics(BaseModel):
+    """Analytics summary for workouts"""
+    total_workouts: int
+    total_exercises_logged: int
+    unique_exercises: int
+    total_volume: float  # Sum of all sets * reps * weight
+    most_frequent_exercises: List[dict]  # List of {exercise_name, count}
+    workout_frequency_by_month: List[dict]  # {month, count}
+    muscle_group_distribution: dict  # {muscle_group: count}
+
