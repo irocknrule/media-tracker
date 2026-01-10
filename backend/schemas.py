@@ -328,3 +328,81 @@ class PortfolioSummary(BaseModel):
     holdings: List[TickerHolding]
     last_updated: Optional[datetime] = None
 
+
+# Asset Allocation schemas
+class AssetAllocationTargetBase(BaseModel):
+    """Base schema for asset allocation target"""
+    category: str
+    target_percentage: float = Field(..., ge=0, le=100)
+    threshold_percentage: float = Field(default=5.0, ge=0, le=100)
+
+
+class AssetAllocationTargetCreate(AssetAllocationTargetBase):
+    """Schema for creating asset allocation target"""
+    pass
+
+
+class AssetAllocationTargetUpdate(BaseModel):
+    """Schema for updating asset allocation target"""
+    target_percentage: Optional[float] = Field(None, ge=0, le=100)
+    threshold_percentage: Optional[float] = Field(None, ge=0, le=100)
+
+
+class AssetAllocationTarget(AssetAllocationTargetBase):
+    """Schema for asset allocation target response"""
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class TickerCategoryBase(BaseModel):
+    """Base schema for ticker category"""
+    ticker: str
+    category: str
+    is_auto_categorized: bool = True
+    notes: Optional[str] = None
+
+
+class TickerCategoryCreate(TickerCategoryBase):
+    """Schema for creating ticker category"""
+    pass
+
+
+class TickerCategoryUpdate(BaseModel):
+    """Schema for updating ticker category"""
+    category: Optional[str] = None
+    is_auto_categorized: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+class TickerCategory(TickerCategoryBase):
+    """Schema for ticker category response"""
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    ticker_name: Optional[str] = None  # Full name of the ticker
+    
+    class Config:
+        from_attributes = True
+
+
+class AllocationCategorySummary(BaseModel):
+    """Summary for a single allocation category"""
+    category: str
+    target_percentage: float
+    actual_percentage: float
+    difference: float
+    threshold: float
+    current_value: float
+    needs_rebalancing: bool
+
+
+class AssetAllocationSummary(BaseModel):
+    """Complete asset allocation summary"""
+    total_portfolio_value: float
+    categories: List[AllocationCategorySummary]
+    last_updated: Optional[datetime] = None
+

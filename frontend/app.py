@@ -474,7 +474,7 @@ def main_app():
             st.markdown("### 💼 Portfolio Tracker")
             st.markdown("---")
             current_page = st.session_state.get("selected_page", "Overview")
-            page_options = ["Overview", "Transactions", "Upload Data", "Individual Holdings"]
+            page_options = ["Overview", "Asset Allocation", "Transactions", "Upload Data", "Individual Holdings"]
             default_index = page_options.index(current_page) if current_page in page_options else 0
             
             page = st.radio(
@@ -517,6 +517,8 @@ def main_app():
     else:  # Portfolio Tracker
         if current_page == "Overview":
             portfolio_overview_page()
+        elif current_page == "Asset Allocation":
+            portfolio_allocation_page()
         elif current_page == "Transactions":
             portfolio_transactions_page()
         elif current_page == "Upload Data":
@@ -3170,33 +3172,54 @@ def portfolio_overview_page():
             if summary['holdings']:
                 holdings = summary['holdings']
                 
-                # Create a display table
-                holdings_data = []
-                for holding in holdings:
-                    holdings_data.append({
-                        "Ticker": holding['ticker'],
-                        "Type": holding['asset_type'],
-                        "Quantity": f"{holding['total_quantity']:.2f}",
-                        "Avg Cost": f"${holding['average_cost']:.2f}",
-                        "Invested": f"${holding['total_invested']:,.2f}",
-                        "Current Price": f"${holding['current_price']:.2f}" if holding.get('current_price') else "N/A",
-                        "Current Value": f"${holding['current_value']:,.2f}" if holding.get('current_value') else "N/A",
-                        "P/L": f"${holding['profit_loss']:,.2f}" if holding.get('profit_loss') else "N/A",
-                        "P/L %": f"{holding['profit_loss_percentage']:.2f}%" if holding.get('profit_loss_percentage') else "N/A"
-                    })
+                # Create header row
+                header_cols = st.columns([1, 1, 1, 1, 1, 1, 1, 1, 1])
+                headers = ["Ticker", "Type", "Quantity", "Avg Cost", "Invested", "Current Price", "Current Value", "P/L", "P/L %"]
+                for col, header in zip(header_cols, headers):
+                    col.markdown(f"**{header}**")
                 
-                # Display as dataframe
-                try:
-                    import pandas as pd
-                    df = pd.DataFrame(holdings_data)
-                    st.dataframe(df, use_container_width=True, hide_index=True)
-                except ImportError:
-                    # Fallback to simple table
-                    for data in holdings_data:
-                        with st.expander(f"{data['Ticker']} - {data['Type']}"):
-                            for key, value in data.items():
-                                if key not in ['Ticker', 'Type']:
-                                    st.write(f"**{key}:** {value}")
+                st.markdown("---")
+                
+                # Display each holding as a row with clickable ticker
+                for holding in holdings:
+                    cols = st.columns([1, 1, 1, 1, 1, 1, 1, 1, 1])
+                    
+                    with cols[0]:
+                        # Make ticker clickable
+                        if st.button(holding['ticker'], key=f"ticker_{holding['ticker']}", help=f"Click to view detailed breakdown"):
+                            st.session_state["selected_page"] = "Individual Holdings"
+                            st.session_state[f"selected_ticker_{holding['ticker']}"] = True
+                            st.experimental_set_query_params(
+                                category="Portfolio Tracker",
+                                page="Individual Holdings"
+                            )
+                            st.rerun()
+                    with cols[1]:
+                        st.write(holding['asset_type'])
+                    with cols[2]:
+                        st.write(f"{holding['total_quantity']:.2f}")
+                    with cols[3]:
+                        st.write(f"${holding['average_cost']:.2f}")
+                    with cols[4]:
+                        st.write(f"${holding['total_invested']:,.2f}")
+                    with cols[5]:
+                        st.write(f"${holding['current_price']:.2f}" if holding.get('current_price') else "N/A")
+                    with cols[6]:
+                        st.write(f"${holding['current_value']:,.2f}" if holding.get('current_value') else "N/A")
+                    with cols[7]:
+                        profit_loss = holding.get('profit_loss')
+                        if profit_loss is not None:
+                            color = "green" if profit_loss >= 0 else "red"
+                            st.markdown(f":{color}[${profit_loss:,.2f}]")
+                        else:
+                            st.write("N/A")
+                    with cols[8]:
+                        pl_pct = holding.get('profit_loss_percentage')
+                        if pl_pct is not None:
+                            color = "green" if pl_pct >= 0 else "red"
+                            st.markdown(f":{color}[{pl_pct:.2f}%]")
+                        else:
+                            st.write("N/A")
                 
                 # Pie chart of holdings by value
                 st.markdown("### 📊 Holdings Distribution")
@@ -3539,781 +3562,803 @@ def portfolio_individual_holdings_page():
                 st.info("No holdings found. Add transactions first.")
                 return
             
-            # Create tabs for each ticker
-            tabs = st.tabs(tickers)
+            # Check if a specific ticker was selected from another page
+            selected_ticker_from_link = None
+            for ticker in tickers:
+                if st.session_state.get(f"selected_ticker_{ticker}", False):
+                    selected_ticker_from_link = ticker
+                    # Clear the flag
+                    st.session_state[f"selected_ticker_{ticker}"] = False
+                    break
             
-            for i, ticker in enumerate(tickers):
-                with tabs[i]:
-                    st.markdown(f"## {ticker}")
+            # Determine default index
+            default_index = 0
+            if selected_ticker_from_link and selected_ticker_from_link in tickers:
+                default_index = tickers.index(selected_ticker_from_link)
+            
+            # Use selectbox to choose ticker
+            selected_ticker = st.selectbox(
+                "Select Ticker to View Details:",
+                tickers,
+                index=default_index,
+                key="individual_holdings_ticker_select"
+            )
+            
+            st.markdown("---")
+            
+            # Display only the selected ticker
+            if selected_ticker:
+                ticker = selected_ticker
+                st.markdown(f"## {ticker}")
+                st.markdown("---")
+                
+                # Get holding details
+                holding_response = make_authenticated_request(
+                    "GET",
+                    f"/portfolio/holdings/{ticker}"
+                )
+                
+                if holding_response.status_code == 200:
+                    holding = holding_response.json()
+                    
+                    # Display metrics in a compact row
+                    col1, col2, col3, col4, col5 = st.columns(5)
+                    
+                    with col1:
+                        st.metric("Asset Type", holding['asset_type'])
+                    
+                    with col2:
+                        st.metric("Quantity", f"{holding['total_quantity']:.2f}")
+                    
+                    with col3:
+                        st.metric("Avg Cost", f"${holding['average_cost']:.2f}")
+                    
+                    with col4:
+                        st.metric("Invested", f"${holding['total_invested']:,.2f}")
+                    
+                    with col5:
+                        if holding.get('current_price'):
+                            st.metric(
+                                "P/L",
+                                f"${holding['profit_loss']:,.2f}",
+                                delta=f"{holding['profit_loss_percentage']:.2f}%"
+                            )
+                        else:
+                            st.metric("Current Price", "N/A")
+                    
                     st.markdown("---")
                     
-                    # Get holding details
-                    holding_response = make_authenticated_request(
-                        "GET",
-                        f"/portfolio/holdings/{ticker}"
-                    )
-                    
-                    if holding_response.status_code == 200:
-                        holding = holding_response.json()
+                    # Delete Ticker Section (Danger Zone)
+                    with st.expander("🗑️ Delete Ticker (Remove All Transactions)", expanded=False):
+                        st.warning(f"⚠️ **Warning**: This will permanently delete ALL transactions for **{ticker}** and remove it from your portfolio.")
                         
-                        # Display metrics in a compact row
-                        col1, col2, col3, col4, col5 = st.columns(5)
-                        
-                        with col1:
-                            st.metric("Asset Type", holding['asset_type'])
-                        
-                        with col2:
-                            st.metric("Quantity", f"{holding['total_quantity']:.2f}")
-                        
-                        with col3:
-                            st.metric("Avg Cost", f"${holding['average_cost']:.2f}")
-                        
-                        with col4:
-                            st.metric("Invested", f"${holding['total_invested']:,.2f}")
-                        
-                        with col5:
-                            if holding.get('current_price'):
-                                st.metric(
-                                    "P/L",
-                                    f"${holding['profit_loss']:,.2f}",
-                                    delta=f"{holding['profit_loss_percentage']:.2f}%"
-                                )
-                            else:
-                                st.metric("Current Price", "N/A")
-                        
-                        st.markdown("---")
-                        
-                        # Delete Ticker Section (Danger Zone)
-                        with st.expander("🗑️ Delete Ticker (Remove All Transactions)", expanded=False):
-                            st.warning(f"⚠️ **Warning**: This will permanently delete ALL transactions for **{ticker}** and remove it from your portfolio.")
-                            
-                            # Show transaction count
-                            txn_count_response = make_authenticated_request(
-                                "GET",
-                                "/portfolio/transactions",
-                                params={"ticker": ticker}
-                            )
-                            
-                            if txn_count_response.status_code == 200:
-                                txn_count = len(txn_count_response.json())
-                                st.info(f"📊 This ticker has **{txn_count}** transaction(s) that will be deleted.")
-                            
-                            st.markdown("---")
-                            
-                            # Confirmation checkbox
-                            confirm_delete_ticker = st.checkbox(
-                                f"I understand this will delete all {ticker} data permanently",
-                                key=f"confirm_delete_ticker_{ticker}"
-                            )
-                            
-                            if confirm_delete_ticker:
-                                if st.button(
-                                    f"🗑️ DELETE ALL {ticker} TRANSACTIONS",
-                                    key=f"delete_all_ticker_{ticker}",
-                                    type="primary",
-                                    use_container_width=True
-                                ):
-                                    try:
-                                        # Get all transactions for this ticker
-                                        response = make_authenticated_request(
-                                            "GET",
-                                            "/portfolio/transactions",
-                                            params={"ticker": ticker}
-                                        )
-                                        
-                                        if response.status_code == 200:
-                                            transactions_to_delete = response.json()
-                                            deleted_count = 0
-                                            failed_count = 0
-                                            
-                                            # Delete each transaction
-                                            for txn in transactions_to_delete:
-                                                del_response = make_authenticated_request(
-                                                    "DELETE",
-                                                    f"/portfolio/transactions/{txn['id']}"
-                                                )
-                                                
-                                                if del_response.status_code == 204:
-                                                    deleted_count += 1
-                                                else:
-                                                    failed_count += 1
-                                            
-                                            if deleted_count > 0:
-                                                st.success(f"✅ Successfully deleted {deleted_count} transaction(s) for {ticker}!")
-                                                st.info("Refreshing page...")
-                                                st.rerun()
-                                            else:
-                                                st.error("No transactions were deleted.")
-                                            
-                                            if failed_count > 0:
-                                                st.error(f"❌ Failed to delete {failed_count} transaction(s)")
-                                        else:
-                                            st.error(f"Failed to fetch transactions: {response.text}")
-                                    
-                                    except Exception as e:
-                                        st.error(f"Error deleting ticker: {str(e)}")
-                        
-                        st.markdown("---")
-                        
-                        # Quick Add Transaction Form
-                        with st.expander("➕ Quick Add Transaction", expanded=False):
-                            with st.form(f"quick_add_transaction_{ticker}"):
-                                st.markdown(f"**Add transaction for {ticker}**")
-                                
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    transaction_type = st.selectbox(
-                                        "Transaction Type*", 
-                                        ["BUY", "SELL"],
-                                        key=f"quick_txn_type_{ticker}"
-                                    )
-                                    transaction_date = st.date_input(
-                                        "Transaction Date*", 
-                                        value=date.today(),
-                                        key=f"quick_txn_date_{ticker}"
-                                    )
-                                    quantity = st.number_input(
-                                        "Quantity (shares)*", 
-                                        min_value=0.0, 
-                                        step=0.01, 
-                                        format="%.2f",
-                                        key=f"quick_quantity_{ticker}"
-                                    )
-                                
-                                with col2:
-                                    price_per_unit = st.number_input(
-                                        "Price per Unit*", 
-                                        min_value=0.0, 
-                                        step=0.01, 
-                                        format="%.2f",
-                                        key=f"quick_price_{ticker}"
-                                    )
-                                    fees = st.number_input(
-                                        "Fees", 
-                                        min_value=0.0, 
-                                        step=0.01, 
-                                        value=0.0, 
-                                        format="%.2f",
-                                        key=f"quick_fees_{ticker}"
-                                    )
-                                    total_amount = st.number_input(
-                                        "Total Amount*",
-                                        min_value=0.0,
-                                        step=0.01,
-                                        value=quantity * price_per_unit if quantity and price_per_unit else 0.0,
-                                        format="%.2f",
-                                        key=f"quick_total_{ticker}"
-                                    )
-                                
-                                notes = st.text_area(
-                                    "Notes (optional)",
-                                    key=f"quick_notes_{ticker}"
-                                )
-                                
-                                submitted = st.form_submit_button("Add Transaction", use_container_width=True)
-                                
-                                if submitted:
-                                    if not quantity or not price_per_unit or not total_amount:
-                                        st.error("Please fill in all required fields (marked with *)")
-                                    else:
-                                        try:
-                                            transaction_data = {
-                                                "ticker": ticker,
-                                                "transaction_type": transaction_type,
-                                                "transaction_date": str(transaction_date),
-                                                "quantity": quantity,
-                                                "price_per_unit": price_per_unit,
-                                                "total_amount": total_amount,
-                                                "fees": fees,
-                                                "notes": notes,
-                                                "asset_type": holding['asset_type']  # Use existing asset type
-                                            }
-                                            
-                                            response = make_authenticated_request(
-                                                "POST",
-                                                "/portfolio/transactions",
-                                                json=transaction_data
-                                            )
-                                            
-                                            if response.status_code == 201:
-                                                st.success(f"✅ Transaction added successfully for {ticker}!")
-                                                st.info("Refreshing page to show updated data...")
-                                                st.rerun()
-                                            else:
-                                                st.error(f"Failed to add transaction: {response.text}")
-                                        
-                                        except Exception as e:
-                                            st.error(f"Error adding transaction: {str(e)}")
-                        
-                        st.markdown("---")
-                        
-                        # Get all transactions for this ticker
-                        txn_response = make_authenticated_request(
+                        # Show transaction count
+                        txn_count_response = make_authenticated_request(
                             "GET",
                             "/portfolio/transactions",
                             params={"ticker": ticker}
                         )
                         
-                        if txn_response.status_code == 200:
-                            transactions = txn_response.json()
-                            
-                            if transactions:
-                                # Get split information for this ticker
+                        if txn_count_response.status_code == 200:
+                            txn_count = len(txn_count_response.json())
+                            st.info(f"📊 This ticker has **{txn_count}** transaction(s) that will be deleted.")
+                        
+                        st.markdown("---")
+                        
+                        # Confirmation checkbox
+                        confirm_delete_ticker = st.checkbox(
+                            f"I understand this will delete all {ticker} data permanently",
+                            key=f"confirm_delete_ticker_{ticker}"
+                        )
+                        
+                        if confirm_delete_ticker:
+                            if st.button(
+                                f"🗑️ DELETE ALL {ticker} TRANSACTIONS",
+                                key=f"delete_all_ticker_{ticker}",
+                                type="primary",
+                                use_container_width=True
+                            ):
                                 try:
-                                    split_response = make_authenticated_request(
+                                    # Get all transactions for this ticker
+                                    response = make_authenticated_request(
                                         "GET",
-                                        f"/portfolio/splits/{ticker}"
+                                        "/portfolio/transactions",
+                                        params={"ticker": ticker}
                                     )
-                                    splits_data = split_response.json() if split_response.status_code == 200 else {}
-                                    splits = splits_data.get('splits', {})
                                     
-                                    # Show split information if any
-                                    if splits:
-                                        st.info(
-                                            f"📊 **Stock Splits Detected:** {len(splits)} split(s) applied to historical data. "
-                                            f"All quantities and prices are adjusted for accurate tracking."
-                                        )
-                                        with st.expander("View Split Details"):
-                                            for split_date, split_ratio in splits.items():
-                                                st.write(f"**{split_date}**: {split_ratio:.2f}-for-1 split")
-                                except:
-                                    splits = {}
-                                
-                                # Sort by date
-                                transactions_sorted = sorted(transactions, key=lambda x: x['transaction_date'])
-                                
-                                # Apply split adjustments to historical transactions
-                                # This ensures we're comparing post-split prices with post-split current price
-                                for txn in transactions_sorted:
-                                    # Get split ratio for this transaction
-                                    txn_date_obj = txn['transaction_date']
-                                    if isinstance(txn_date_obj, str):
-                                        from datetime import datetime as dt
-                                        txn_date_obj = dt.strptime(txn_date_obj, "%Y-%m-%d").date()
-                                    
-                                    # Calculate split adjustment
-                                    split_ratio = 1.0
-                                    if splits:
-                                        for split_date_str, ratio in splits.items():
-                                            try:
-                                                from datetime import datetime as dt
-                                                split_date = dt.strptime(split_date_str, '%Y-%m-%d').date()
-                                                # If split happened AFTER this transaction, adjust the price
-                                                if split_date > txn_date_obj:
-                                                    split_ratio *= ratio
-                                            except:
-                                                continue
-                                    
-                                    # Apply split adjustment to this transaction
-                                    # Quantity increases, price decreases by split ratio
-                                    if split_ratio != 1.0:
-                                        txn['quantity'] = txn['quantity'] * split_ratio
-                                        txn['price_per_unit'] = txn['price_per_unit'] / split_ratio
-                                        # total_amount stays the same (quantity × price remains constant)
-                                
-                                # Calculate cumulative gain/loss over time (matching Excel logic)
-                                # Each purchase lot contributes: (lot_quantity × current_price) - lot_cost
-                                # Cumulative = Sum of all lot contributions (for remaining lots after FIFO sells)
-                                # This shows the total performance across all your investments at different cost bases
-                                timeline_data = []
-                                
-                                # Track purchase lots with their original purchase price for delta calculation
-                                purchase_lots = []  # List of {'quantity': float, 'price_per_unit': float, 'total_cost': float, 'date': str}
-                                
-                                # Get current market price to use for all calculations
-                                current_market_price = holding.get('current_price')
-                                
-                                if not current_market_price:
-                                    # Fallback: use last transaction price if no current price
-                                    if transactions_sorted:
-                                        current_market_price = transactions_sorted[-1]['price_per_unit']
-                                
-                                for txn in transactions_sorted:
-                                    txn_date = txn['transaction_date']
-                                    txn_type = txn['transaction_type']
-                                    quantity = txn['quantity']
-                                    price = txn['price_per_unit']
-                                    total_cost = txn['total_amount'] + txn.get('fees', 0)
-                                    
-                                    if txn_type == 'BUY':
-                                        # Add this purchase lot with its original purchase price
-                                        purchase_lots.append({
-                                            'quantity': quantity,
-                                            'price_per_unit': price,
-                                            'total_cost': total_cost,
-                                            'date': txn_date
-                                        })
+                                    if response.status_code == 200:
+                                        transactions_to_delete = response.json()
+                                        deleted_count = 0
+                                        failed_count = 0
                                         
-                                    elif txn_type == 'SELL':
-                                        # Remove sold shares using FIFO
-                                        remaining_to_sell = quantity
-                                        
-                                        while remaining_to_sell > 0 and purchase_lots:
-                                            lot = purchase_lots[0]
-                                            lot_quantity = lot['quantity']
+                                        # Delete each transaction
+                                        for txn in transactions_to_delete:
+                                            del_response = make_authenticated_request(
+                                                "DELETE",
+                                                f"/portfolio/transactions/{txn['id']}"
+                                            )
                                             
-                                            if lot_quantity <= remaining_to_sell:
-                                                # Sell entire lot
-                                                remaining_to_sell -= lot_quantity
-                                                purchase_lots.pop(0)
+                                            if del_response.status_code == 204:
+                                                deleted_count += 1
                                             else:
-                                                # Sell partial lot - reduce quantity proportionally
-                                                sold_ratio = remaining_to_sell / lot_quantity
-                                                lot['quantity'] -= remaining_to_sell
-                                                lot['total_cost'] -= (lot['total_cost'] * sold_ratio)
-                                                # price_per_unit stays the same (original purchase price)
-                                                remaining_to_sell = 0
-                                    
-                                    # Calculate cumulative gain/loss: sum of each lot's contribution
-                                    # Each lot contributes: (lot_qty × current_price) - lot_cost
-                                    cumulative_gain_loss = 0.0
-                                    total_quantity = 0.0
-                                    total_cost_basis = 0.0
-                                    
-                                    if current_market_price:
-                                        for lot in purchase_lots:
-                                            lot_current_value = lot['quantity'] * current_market_price
-                                            lot_gain_loss = lot_current_value - lot['total_cost']
-                                            cumulative_gain_loss += lot_gain_loss
-                                            total_quantity += lot['quantity']
-                                            total_cost_basis += lot['total_cost']
+                                                failed_count += 1
+                                        
+                                        if deleted_count > 0:
+                                            st.success(f"✅ Successfully deleted {deleted_count} transaction(s) for {ticker}!")
+                                            st.info("Refreshing page...")
+                                            st.rerun()
+                                        else:
+                                            st.error("No transactions were deleted.")
+                                        
+                                        if failed_count > 0:
+                                            st.error(f"❌ Failed to delete {failed_count} transaction(s)")
                                     else:
-                                        total_quantity = sum(lot['quantity'] for lot in purchase_lots)
-                                        total_cost_basis = sum(lot['total_cost'] for lot in purchase_lots)
-                                    
-                                    avg_cost_basis = total_cost_basis / total_quantity if total_quantity > 0 else 0
-                                    
-                                    timeline_data.append({
-                                        'date': txn_date,
-                                        'quantity': total_quantity,
-                                        'avg_cost': avg_cost_basis,
-                                        'invested': total_cost_basis,
-                                        'cumulative_gain_loss': cumulative_gain_loss,
-                                        'transaction_type': txn_type,
-                                        'transaction_quantity': quantity,
-                                        'transaction_price': price
-                                    })
+                                        st.error(f"Failed to fetch transactions: {response.text}")
                                 
-                                # Add final data point with current price if available (for most up-to-date view)
-                                if current_market_price and timeline_data:
-                                    last_entry = timeline_data[-1]
+                                except Exception as e:
+                                    st.error(f"Error deleting ticker: {str(e)}")
+                    
+                    st.markdown("---")
+                    
+                    # Quick Add Transaction Form
+                    with st.expander("➕ Quick Add Transaction", expanded=False):
+                        with st.form(f"quick_add_transaction_{ticker}"):
+                            st.markdown(f"**Add transaction for {ticker}**")
+                            
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                transaction_type = st.selectbox(
+                                    "Transaction Type*", 
+                                    ["BUY", "SELL"],
+                                    key=f"quick_txn_type_{ticker}"
+                                )
+                                transaction_date = st.date_input(
+                                    "Transaction Date*", 
+                                    value=date.today(),
+                                    key=f"quick_txn_date_{ticker}"
+                                )
+                                quantity = st.number_input(
+                                    "Quantity (shares)*", 
+                                    min_value=0.0, 
+                                    step=0.01, 
+                                    format="%.2f",
+                                    key=f"quick_quantity_{ticker}"
+                                )
+                            
+                            with col2:
+                                price_per_unit = st.number_input(
+                                    "Price per Unit*", 
+                                    min_value=0.0, 
+                                    step=0.01, 
+                                    format="%.2f",
+                                    key=f"quick_price_{ticker}"
+                                )
+                                fees = st.number_input(
+                                    "Fees", 
+                                    min_value=0.0, 
+                                    step=0.01, 
+                                    value=0.0, 
+                                    format="%.2f",
+                                    key=f"quick_fees_{ticker}"
+                                )
+                                total_amount = st.number_input(
+                                    "Total Amount*",
+                                    min_value=0.0,
+                                    step=0.01,
+                                    value=quantity * price_per_unit if quantity and price_per_unit else 0.0,
+                                    format="%.2f",
+                                    key=f"quick_total_{ticker}"
+                                )
+                            
+                            notes = st.text_area(
+                                "Notes (optional)",
+                                key=f"quick_notes_{ticker}"
+                            )
+                            
+                            submitted = st.form_submit_button("Add Transaction", use_container_width=True)
+                            
+                            if submitted:
+                                if not quantity or not price_per_unit or not total_amount:
+                                    st.error("Please fill in all required fields (marked with *)")
+                                else:
+                                    try:
+                                        transaction_data = {
+                                            "ticker": ticker,
+                                            "transaction_type": transaction_type,
+                                            "transaction_date": str(transaction_date),
+                                            "quantity": quantity,
+                                            "price_per_unit": price_per_unit,
+                                            "total_amount": total_amount,
+                                            "fees": fees,
+                                            "notes": notes,
+                                            "asset_type": holding['asset_type']  # Use existing asset type
+                                        }
+                                        
+                                        response = make_authenticated_request(
+                                            "POST",
+                                            "/portfolio/transactions",
+                                            json=transaction_data
+                                        )
+                                        
+                                        if response.status_code == 201:
+                                            st.success(f"✅ Transaction added successfully for {ticker}!")
+                                            st.info("Refreshing page to show updated data...")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Failed to add transaction: {response.text}")
                                     
-                                    # Use today's date for the final point
-                                    from datetime import datetime
-                                    final_date = datetime.now().date().isoformat()
+                                    except Exception as e:
+                                        st.error(f"Error adding transaction: {str(e)}")
+                    
+                    st.markdown("---")
+                    
+                    # Get all transactions for this ticker
+                    txn_response = make_authenticated_request(
+                        "GET",
+                        "/portfolio/transactions",
+                        params={"ticker": ticker}
+                    )
+                    
+                    if txn_response.status_code == 200:
+                        transactions = txn_response.json()
+                        
+                        if transactions:
+                            # Get split information for this ticker
+                            try:
+                                split_response = make_authenticated_request(
+                                    "GET",
+                                    f"/portfolio/splits/{ticker}"
+                                )
+                                splits_data = split_response.json() if split_response.status_code == 200 else {}
+                                splits = splits_data.get('splits', {})
+                                
+                                # Show split information if any
+                                if splits:
+                                    st.info(
+                                        f"📊 **Stock Splits Detected:** {len(splits)} split(s) applied to historical data. "
+                                        f"All quantities and prices are adjusted for accurate tracking."
+                                    )
+                                    with st.expander("View Split Details"):
+                                        for split_date, split_ratio in splits.items():
+                                            st.write(f"**{split_date}**: {split_ratio:.2f}-for-1 split")
+                            except:
+                                splits = {}
+                            
+                            # Sort by date
+                            transactions_sorted = sorted(transactions, key=lambda x: x['transaction_date'])
+                            
+                            # Apply split adjustments to historical transactions
+                            # This ensures we're comparing post-split prices with post-split current price
+                            for txn in transactions_sorted:
+                                # Get split ratio for this transaction
+                                txn_date_obj = txn['transaction_date']
+                                if isinstance(txn_date_obj, str):
+                                    from datetime import datetime as dt
+                                    txn_date_obj = dt.strptime(txn_date_obj, "%Y-%m-%d").date()
+                                
+                                # Calculate split adjustment
+                                split_ratio = 1.0
+                                if splits:
+                                    for split_date_str, ratio in splits.items():
+                                        try:
+                                            from datetime import datetime as dt
+                                            split_date = dt.strptime(split_date_str, '%Y-%m-%d').date()
+                                            # If split happened AFTER this transaction, adjust the price
+                                            if split_date > txn_date_obj:
+                                                split_ratio *= ratio
+                                        except:
+                                            continue
+                                
+                                # Apply split adjustment to this transaction
+                                # Quantity increases, price decreases by split ratio
+                                if split_ratio != 1.0:
+                                    txn['quantity'] = txn['quantity'] * split_ratio
+                                    txn['price_per_unit'] = txn['price_per_unit'] / split_ratio
+                                    # total_amount stays the same (quantity × price remains constant)
+                            
+                            # Calculate cumulative gain/loss over time (matching Excel logic)
+                            # Each purchase lot contributes: (lot_quantity × current_price) - lot_cost
+                            # Cumulative = Sum of all lot contributions (for remaining lots after FIFO sells)
+                            # This shows the total performance across all your investments at different cost bases
+                            timeline_data = []
+                            
+                            # Track purchase lots with their original purchase price for delta calculation
+                            purchase_lots = []  # List of {'quantity': float, 'price_per_unit': float, 'total_cost': float, 'date': str}
+                            
+                            # Get current market price to use for all calculations
+                            current_market_price = holding.get('current_price')
+                            
+                            if not current_market_price:
+                                # Fallback: use last transaction price if no current price
+                                if transactions_sorted:
+                                    current_market_price = transactions_sorted[-1]['price_per_unit']
+                            
+                            for txn in transactions_sorted:
+                                txn_date = txn['transaction_date']
+                                txn_type = txn['transaction_type']
+                                quantity = txn['quantity']
+                                price = txn['price_per_unit']
+                                total_cost = txn['total_amount'] + txn.get('fees', 0)
+                                
+                                if txn_type == 'BUY':
+                                    # Add this purchase lot with its original purchase price
+                                    purchase_lots.append({
+                                        'quantity': quantity,
+                                        'price_per_unit': price,
+                                        'total_cost': total_cost,
+                                        'date': txn_date
+                                    })
                                     
-                                    # Recalculate cumulative with current price (sum of all lot contributions)
-                                    final_cumulative = 0.0
+                                elif txn_type == 'SELL':
+                                    # Remove sold shares using FIFO
+                                    remaining_to_sell = quantity
+                                    
+                                    while remaining_to_sell > 0 and purchase_lots:
+                                        lot = purchase_lots[0]
+                                        lot_quantity = lot['quantity']
+                                        
+                                        if lot_quantity <= remaining_to_sell:
+                                            # Sell entire lot
+                                            remaining_to_sell -= lot_quantity
+                                            purchase_lots.pop(0)
+                                        else:
+                                            # Sell partial lot - reduce quantity proportionally
+                                            sold_ratio = remaining_to_sell / lot_quantity
+                                            lot['quantity'] -= remaining_to_sell
+                                            lot['total_cost'] -= (lot['total_cost'] * sold_ratio)
+                                            # price_per_unit stays the same (original purchase price)
+                                            remaining_to_sell = 0
+                                
+                                # Calculate cumulative gain/loss: sum of each lot's contribution
+                                # Each lot contributes: (lot_qty × current_price) - lot_cost
+                                cumulative_gain_loss = 0.0
+                                total_quantity = 0.0
+                                total_cost_basis = 0.0
+                                
+                                if current_market_price:
                                     for lot in purchase_lots:
                                         lot_current_value = lot['quantity'] * current_market_price
                                         lot_gain_loss = lot_current_value - lot['total_cost']
-                                        final_cumulative += lot_gain_loss
+                                        cumulative_gain_loss += lot_gain_loss
+                                        total_quantity += lot['quantity']
+                                        total_cost_basis += lot['total_cost']
+                                else:
+                                    total_quantity = sum(lot['quantity'] for lot in purchase_lots)
+                                    total_cost_basis = sum(lot['total_cost'] for lot in purchase_lots)
+                                
+                                avg_cost_basis = total_cost_basis / total_quantity if total_quantity > 0 else 0
+                                
+                                timeline_data.append({
+                                    'date': txn_date,
+                                    'quantity': total_quantity,
+                                    'avg_cost': avg_cost_basis,
+                                    'invested': total_cost_basis,
+                                    'cumulative_gain_loss': cumulative_gain_loss,
+                                    'transaction_type': txn_type,
+                                    'transaction_quantity': quantity,
+                                    'transaction_price': price
+                                })
+                            
+                            # Add final data point with current price if available (for most up-to-date view)
+                            if current_market_price and timeline_data:
+                                last_entry = timeline_data[-1]
+                                
+                                # Use today's date for the final point
+                                from datetime import datetime
+                                final_date = datetime.now().date().isoformat()
+                                
+                                # Recalculate cumulative with current price (sum of all lot contributions)
+                                final_cumulative = 0.0
+                                for lot in purchase_lots:
+                                    lot_current_value = lot['quantity'] * current_market_price
+                                    lot_gain_loss = lot_current_value - lot['total_cost']
+                                    final_cumulative += lot_gain_loss
+                                
+                                timeline_data.append({
+                                    'date': final_date,
+                                    'quantity': last_entry['quantity'],
+                                    'avg_cost': last_entry['avg_cost'],
+                                    'invested': last_entry['invested'],
+                                    'cumulative_gain_loss': final_cumulative,
+                                    'transaction_type': 'CURRENT',
+                                    'transaction_quantity': 0,
+                                    'transaction_price': current_market_price
+                                })
+                            
+                            # Plot cumulative gain/loss timeline
+                            st.markdown("### 📈 Cumulative Gain/Loss Over Time")
+                            
+                            if timeline_data:
+                                try:
+                                    import plotly.graph_objects as go
+                                    import pandas as pd
+                                    from datetime import datetime
                                     
-                                    timeline_data.append({
-                                        'date': final_date,
-                                        'quantity': last_entry['quantity'],
-                                        'avg_cost': last_entry['avg_cost'],
-                                        'invested': last_entry['invested'],
-                                        'cumulative_gain_loss': final_cumulative,
-                                        'transaction_type': 'CURRENT',
-                                        'transaction_quantity': 0,
-                                        'transaction_price': current_market_price
-                                    })
-                                
-                                # Plot cumulative gain/loss timeline
-                                st.markdown("### 📈 Cumulative Gain/Loss Over Time")
-                                
-                                if timeline_data:
-                                    try:
-                                        import plotly.graph_objects as go
-                                        import pandas as pd
-                                        from datetime import datetime
-                                        
-                                        df = pd.DataFrame(timeline_data)
-                                        
-                                        # Convert date strings to datetime objects
-                                        df['date'] = pd.to_datetime(df['date'])
-                                        
-                                        # CRITICAL: Force numeric type and clean any issues
-                                        df['cumulative_gain_loss'] = pd.to_numeric(df['cumulative_gain_loss'], errors='coerce')
-                                        
-                                        # Create figure focused on cumulative gain/loss
-                                        fig = go.Figure()
-                                        
-                                        # Determine line color based on final gain/loss (green for positive, red for negative)
-                                        final_gain_loss = float(df['cumulative_gain_loss'].iloc[-1])
-                                        line_color = '#00cc88' if final_gain_loss >= 0 else '#ff4444'  # Streamlit-style colors
-                                        
-                                        # Set fill color based on gain/loss
-                                        if final_gain_loss >= 0:
-                                            fill_color = 'rgba(0, 204, 136, 0.15)'  # Light green
-                                        else:
-                                            fill_color = 'rgba(255, 68, 68, 0.15)'  # Light red
-                                        
-                                        # Convert to lists to avoid any pandas/plotly interaction issues
-                                        x_data = df['date'].tolist()
-                                        y_data = df['cumulative_gain_loss'].tolist()
-                                        
-                                        # Add cumulative gain/loss line
-                                        fig.add_trace(go.Scatter(
-                                            x=x_data,
-                                            y=y_data,
-                                            mode='lines+markers',
-                                            name='Cumulative Gain/Loss',
-                                            line=dict(color=line_color, width=3),
-                                            marker=dict(size=6, color=line_color),
-                                            hovertemplate='<b>%{x}</b><br>Cumulative Gain/Loss: $%{y:,.2f}<extra></extra>',
-                                            fill='tozeroy',
-                                            fillcolor=fill_color
-                                        ))
-                                        
-                                        # Update layout - match app style
-                                        fig.update_layout(
-                                            title=dict(
-                                                text=f"{ticker} - Cumulative Gain/Loss Over Time",
-                                                font=dict(size=18)
-                                            ),
-                                            xaxis_title="Date",
-                                            yaxis_title="Cumulative Gain/Loss ($)",
-                                            hovermode='x unified',
-                                            showlegend=False,
-                                            height=500,
-                                            plot_bgcolor='rgba(0,0,0,0)',
-                                            paper_bgcolor='rgba(0,0,0,0)',
-                                            xaxis=dict(
-                                                showgrid=True,
-                                                gridcolor='rgba(128, 128, 128, 0.2)',
-                                                showline=True,
-                                                linecolor='rgba(128, 128, 128, 0.3)'
-                                            ),
-                                            yaxis=dict(
-                                                showgrid=True,
-                                                gridcolor='rgba(128, 128, 128, 0.2)',
-                                                showline=True,
-                                                linecolor='rgba(128, 128, 128, 0.3)',
-                                                range=[min(y_data) - abs(min(y_data) * 0.1), max(y_data) + abs(max(y_data) * 0.1)],  # 10% padding
-                                                tickprefix='$',  # Add $ to all tick labels
-                                                tickformat=',.0f'  # Format with commas, no decimals
-                                            )
+                                    df = pd.DataFrame(timeline_data)
+                                    
+                                    # Convert date strings to datetime objects
+                                    df['date'] = pd.to_datetime(df['date'])
+                                    
+                                    # CRITICAL: Force numeric type and clean any issues
+                                    df['cumulative_gain_loss'] = pd.to_numeric(df['cumulative_gain_loss'], errors='coerce')
+                                    
+                                    # Create figure focused on cumulative gain/loss
+                                    fig = go.Figure()
+                                    
+                                    # Determine line color based on final gain/loss (green for positive, red for negative)
+                                    final_gain_loss = float(df['cumulative_gain_loss'].iloc[-1])
+                                    line_color = '#00cc88' if final_gain_loss >= 0 else '#ff4444'  # Streamlit-style colors
+                                    
+                                    # Set fill color based on gain/loss
+                                    if final_gain_loss >= 0:
+                                        fill_color = 'rgba(0, 204, 136, 0.15)'  # Light green
+                                    else:
+                                        fill_color = 'rgba(255, 68, 68, 0.15)'  # Light red
+                                    
+                                    # Convert to lists to avoid any pandas/plotly interaction issues
+                                    x_data = df['date'].tolist()
+                                    y_data = df['cumulative_gain_loss'].tolist()
+                                    
+                                    # Add cumulative gain/loss line
+                                    fig.add_trace(go.Scatter(
+                                        x=x_data,
+                                        y=y_data,
+                                        mode='lines+markers',
+                                        name='Cumulative Gain/Loss',
+                                        line=dict(color=line_color, width=3),
+                                        marker=dict(size=6, color=line_color),
+                                        hovertemplate='<b>%{x}</b><br>Cumulative Gain/Loss: $%{y:,.2f}<extra></extra>',
+                                        fill='tozeroy',
+                                        fillcolor=fill_color
+                                    ))
+                                    
+                                    # Update layout - match app style
+                                    fig.update_layout(
+                                        title=dict(
+                                            text=f"{ticker} - Cumulative Gain/Loss Over Time",
+                                            font=dict(size=18)
+                                        ),
+                                        xaxis_title="Date",
+                                        yaxis_title="Cumulative Gain/Loss ($)",
+                                        hovermode='x unified',
+                                        showlegend=False,
+                                        height=500,
+                                        plot_bgcolor='rgba(0,0,0,0)',
+                                        paper_bgcolor='rgba(0,0,0,0)',
+                                        xaxis=dict(
+                                            showgrid=True,
+                                            gridcolor='rgba(128, 128, 128, 0.2)',
+                                            showline=True,
+                                            linecolor='rgba(128, 128, 128, 0.3)'
+                                        ),
+                                        yaxis=dict(
+                                            showgrid=True,
+                                            gridcolor='rgba(128, 128, 128, 0.2)',
+                                            showline=True,
+                                            linecolor='rgba(128, 128, 128, 0.3)',
+                                            range=[min(y_data) - abs(min(y_data) * 0.1), max(y_data) + abs(max(y_data) * 0.1)],  # 10% padding
+                                            tickprefix='$',  # Add $ to all tick labels
+                                            tickformat=',.0f'  # Format with commas, no decimals
                                         )
-                                        
-                                        # Add zero line for reference
-                                        fig.add_hline(y=0, line_dash="dash", line_color="rgba(128, 128, 128, 0.5)", opacity=0.7)
-                                        
-                                        # Use a unique key to force fresh render
-                                        chart_key = f"portfolio_chart_{ticker}_{datetime.now().timestamp()}"
-                                        st.plotly_chart(fig, use_container_width=True, key=chart_key)
-                                        
-                                        # Show current position summary
-                                        if holding.get('current_price'):
-                                            st.success(
-                                                f"**Current Position:** {holding['total_quantity']:.2f} shares @ ${holding['current_price']:.2f} = "
-                                                f"${holding['current_value']:,.2f} "
-                                                f"({'📈 +' if holding['profit_loss'] >= 0 else '📉 '}"
-                                                f"${abs(holding['profit_loss']):,.2f} / "
-                                                f"{holding['profit_loss_percentage']:.2f}%)"
-                                            )
-                                        else:
-                                            st.info(
-                                                f"**Current Position:** {holding['total_quantity']:.2f} shares "
-                                                f"(Cost Basis: ${holding['average_cost']:.2f}/share, "
-                                                f"Total Invested: ${holding['total_invested']:,.2f})"
-                                            )
-                                        
-                                    except ImportError:
-                                        st.warning("Install plotly for timeline visualization: pip install plotly")
-                                        # Fallback to simple metrics
-                                        if timeline_data:
-                                            latest = timeline_data[-1]
-                                            col1, col2, col3 = st.columns(3)
-                                            with col1:
-                                                st.metric("Total Invested", f"${latest['invested']:,.2f}")
-                                            with col2:
-                                                st.metric("Current Value", f"${latest['current_value']:,.2f}")
-                                            with col3:
-                                                st.metric("Cumulative Gain/Loss", f"${latest['cumulative_gain_loss']:,.2f}")
-                                
-                                st.markdown("---")
-                                
-                                # Transaction history in collapsible expander
-                                with st.expander("📋 Transaction History", expanded=False):
-                                    if transactions_sorted:
-                                        st.markdown(f"**{len(transactions_sorted)} transaction(s)**")
-                                        
-                                        # Initialize session state for selected transactions if not exists
-                                        if f'selected_txns_{ticker}' not in st.session_state:
-                                            st.session_state[f'selected_txns_{ticker}'] = []
-                                        
-                                        # Sorting controls
-                                        sort_col1, sort_col2, sort_col3 = st.columns([2, 2, 6])
-                                        with sort_col1:
-                                            sort_by = st.selectbox(
-                                                "Sort by",
-                                                ["Date", "Type", "Quantity", "Price", "Total", "Fees"],
-                                                key=f"sort_by_{ticker}"
-                                            )
-                                        with sort_col2:
-                                            sort_order = st.selectbox(
-                                                "Order",
-                                                ["Descending", "Ascending"],
-                                                key=f"sort_order_{ticker}"
-                                            )
-                                        
-                                        # Apply sorting
-                                        sort_key_map = {
-                                            "Date": "transaction_date",
-                                            "Type": "transaction_type",
-                                            "Quantity": "quantity",
-                                            "Price": "price_per_unit",
-                                            "Total": "total_amount",
-                                            "Fees": "fees"
-                                        }
-                                        sort_key = sort_key_map[sort_by]
-                                        reverse_sort = (sort_order == "Descending")
-                                        
-                                        transactions_sorted = sorted(
-                                            transactions_sorted,
-                                            key=lambda x: x[sort_key],
-                                            reverse=reverse_sort
+                                    )
+                                    
+                                    # Add zero line for reference
+                                    fig.add_hline(y=0, line_dash="dash", line_color="rgba(128, 128, 128, 0.5)", opacity=0.7)
+                                    
+                                    # Use a unique key to force fresh render
+                                    chart_key = f"portfolio_chart_{ticker}_{datetime.now().timestamp()}"
+                                    st.plotly_chart(fig, use_container_width=True, key=chart_key)
+                                    
+                                    # Show current position summary
+                                    if holding.get('current_price'):
+                                        st.success(
+                                            f"**Current Position:** {holding['total_quantity']:.2f} shares @ ${holding['current_price']:.2f} = "
+                                            f"${holding['current_value']:,.2f} "
+                                            f"({'📈 +' if holding['profit_loss'] >= 0 else '📉 '}"
+                                            f"${abs(holding['profit_loss']):,.2f} / "
+                                            f"{holding['profit_loss_percentage']:.2f}%)"
                                         )
-                                        
-                                        st.markdown("---")
-                                        
-                                        # Bulk actions header
-                                        col1, col2, col3 = st.columns([1, 1, 4])
+                                    else:
+                                        st.info(
+                                            f"**Current Position:** {holding['total_quantity']:.2f} shares "
+                                            f"(Cost Basis: ${holding['average_cost']:.2f}/share, "
+                                            f"Total Invested: ${holding['total_invested']:,.2f})"
+                                        )
+                                    
+                                except ImportError:
+                                    st.warning("Install plotly for timeline visualization: pip install plotly")
+                                    # Fallback to simple metrics
+                                    if timeline_data:
+                                        latest = timeline_data[-1]
+                                        col1, col2, col3 = st.columns(3)
                                         with col1:
-                                            if st.button("Select All", key=f"select_all_{ticker}"):
-                                                st.session_state[f'selected_txns_{ticker}'] = [txn['id'] for txn in transactions_sorted]
-                                                st.rerun()
+                                            st.metric("Total Invested", f"${latest['invested']:,.2f}")
                                         with col2:
-                                            if st.button("Deselect All", key=f"deselect_all_{ticker}"):
-                                                st.session_state[f'selected_txns_{ticker}'] = []
-                                                st.rerun()
+                                            st.metric("Current Value", f"${latest['current_value']:,.2f}")
                                         with col3:
-                                            selected_count = len(st.session_state[f'selected_txns_{ticker}'])
-                                            if selected_count > 0:
-                                                if st.button(
-                                                    f"🗑️ Delete {selected_count} Selected",
-                                                    key=f"bulk_delete_txns_{ticker}",
-                                                    type="primary"
-                                                ):
-                                                    try:
-                                                        deleted_count = 0
-                                                        failed_count = 0
+                                            st.metric("Cumulative Gain/Loss", f"${latest['cumulative_gain_loss']:,.2f}")
+                            
+                            st.markdown("---")
+                            
+                            # Transaction history in collapsible expander
+                            with st.expander("📋 Transaction History", expanded=False):
+                                if transactions_sorted:
+                                    st.markdown(f"**{len(transactions_sorted)} transaction(s)**")
+                                    
+                                    # Initialize session state for selected transactions if not exists
+                                    if f'selected_txns_{ticker}' not in st.session_state:
+                                        st.session_state[f'selected_txns_{ticker}'] = []
+                                    
+                                    # Sorting controls
+                                    sort_col1, sort_col2, sort_col3 = st.columns([2, 2, 6])
+                                    with sort_col1:
+                                        sort_by = st.selectbox(
+                                            "Sort by",
+                                            ["Date", "Type", "Quantity", "Price", "Total", "Fees"],
+                                            key=f"sort_by_{ticker}"
+                                        )
+                                    with sort_col2:
+                                        sort_order = st.selectbox(
+                                            "Order",
+                                            ["Descending", "Ascending"],
+                                            key=f"sort_order_{ticker}"
+                                        )
+                                    
+                                    # Apply sorting
+                                    sort_key_map = {
+                                        "Date": "transaction_date",
+                                        "Type": "transaction_type",
+                                        "Quantity": "quantity",
+                                        "Price": "price_per_unit",
+                                        "Total": "total_amount",
+                                        "Fees": "fees"
+                                    }
+                                    sort_key = sort_key_map[sort_by]
+                                    reverse_sort = (sort_order == "Descending")
+                                    
+                                    transactions_sorted = sorted(
+                                        transactions_sorted,
+                                        key=lambda x: x[sort_key],
+                                        reverse=reverse_sort
+                                    )
+                                    
+                                    st.markdown("---")
+                                    
+                                    # Bulk actions header
+                                    col1, col2, col3 = st.columns([1, 1, 4])
+                                    with col1:
+                                        if st.button("Select All", key=f"select_all_{ticker}"):
+                                            st.session_state[f'selected_txns_{ticker}'] = [txn['id'] for txn in transactions_sorted]
+                                            st.rerun()
+                                    with col2:
+                                        if st.button("Deselect All", key=f"deselect_all_{ticker}"):
+                                            st.session_state[f'selected_txns_{ticker}'] = []
+                                            st.rerun()
+                                    with col3:
+                                        selected_count = len(st.session_state[f'selected_txns_{ticker}'])
+                                        if selected_count > 0:
+                                            if st.button(
+                                                f"🗑️ Delete {selected_count} Selected",
+                                                key=f"bulk_delete_txns_{ticker}",
+                                                type="primary"
+                                            ):
+                                                try:
+                                                    deleted_count = 0
+                                                    failed_count = 0
+                                                    
+                                                    for txn_id in st.session_state[f'selected_txns_{ticker}']:
+                                                        response = make_authenticated_request(
+                                                            "DELETE",
+                                                            f"/portfolio/transactions/{txn_id}"
+                                                        )
                                                         
-                                                        for txn_id in st.session_state[f'selected_txns_{ticker}']:
+                                                        if response.status_code == 204:
+                                                            deleted_count += 1
+                                                        else:
+                                                            failed_count += 1
+                                                    
+                                                    # Clear selection
+                                                    st.session_state[f'selected_txns_{ticker}'] = []
+                                                    
+                                                    if deleted_count > 0:
+                                                        st.success(f"✅ Successfully deleted {deleted_count} transaction(s)!")
+                                                    if failed_count > 0:
+                                                        st.error(f"❌ Failed to delete {failed_count} transaction(s)")
+                                                    
+                                                    st.rerun()
+                                                
+                                                except Exception as e:
+                                                    st.error(f"Error deleting transactions: {str(e)}")
+                                    
+                                    st.markdown("---")
+                                    
+                                    # Display transactions with individual action buttons
+                                    for txn in transactions_sorted:
+                                        # Check if this transaction is being edited
+                                        edit_key = f'edit_txn_{ticker}_{txn["id"]}'
+                                        is_editing = st.session_state.get(edit_key, False)
+                                        
+                                        if is_editing:
+                                            # Show edit form in a container
+                                            with st.container():
+                                                st.markdown(f"**✏️ Editing Transaction (ID: {txn['id']})**")
+                                                
+                                                with st.form(f"edit_form_{ticker}_{txn['id']}"):
+                                                    col1, col2 = st.columns(2)
+                                                    
+                                                    with col1:
+                                                        edit_type = st.selectbox(
+                                                            "Type",
+                                                            ["BUY", "SELL"],
+                                                            index=0 if txn['transaction_type'] == "BUY" else 1,
+                                                            key=f"edit_type_{ticker}_{txn['id']}"
+                                                        )
+                                                        from datetime import datetime as dt
+                                                        txn_date = dt.strptime(txn['transaction_date'], "%Y-%m-%d").date() if isinstance(txn['transaction_date'], str) else txn['transaction_date']
+                                                        edit_date = st.date_input(
+                                                            "Date",
+                                                            value=txn_date,
+                                                            key=f"edit_date_{ticker}_{txn['id']}"
+                                                        )
+                                                        edit_quantity = st.number_input(
+                                                            "Quantity",
+                                                            min_value=0.0,
+                                                            value=float(txn['quantity']),
+                                                            step=0.01,
+                                                            format="%.2f",
+                                                            key=f"edit_qty_{ticker}_{txn['id']}"
+                                                        )
+                                                    
+                                                    with col2:
+                                                        edit_price = st.number_input(
+                                                            "Price/Unit",
+                                                            min_value=0.0,
+                                                            value=float(txn['price_per_unit']),
+                                                            step=0.01,
+                                                            format="%.2f",
+                                                            key=f"edit_price_{ticker}_{txn['id']}"
+                                                        )
+                                                        edit_fees = st.number_input(
+                                                            "Fees",
+                                                            min_value=0.0,
+                                                            value=float(txn['fees']),
+                                                            step=0.01,
+                                                            format="%.2f",
+                                                            key=f"edit_fees_{ticker}_{txn['id']}"
+                                                        )
+                                                        edit_total = st.number_input(
+                                                            "Total",
+                                                            min_value=0.0,
+                                                            value=float(txn['total_amount']),
+                                                            step=0.01,
+                                                            format="%.2f",
+                                                            key=f"edit_total_{ticker}_{txn['id']}"
+                                                        )
+                                                    
+                                                    edit_notes = st.text_area(
+                                                        "Notes",
+                                                        value=txn.get('notes', ''),
+                                                        key=f"edit_notes_{ticker}_{txn['id']}"
+                                                    )
+                                                    
+                                                    col1, col2 = st.columns(2)
+                                                    with col1:
+                                                        save_btn = st.form_submit_button("💾 Save Changes", use_container_width=True)
+                                                    with col2:
+                                                        cancel_btn = st.form_submit_button("❌ Cancel", use_container_width=True)
+                                                    
+                                                    if save_btn:
+                                                        try:
+                                                            update_data = {
+                                                                "transaction_type": edit_type,
+                                                                "transaction_date": str(edit_date),
+                                                                "quantity": edit_quantity,
+                                                                "price_per_unit": edit_price,
+                                                                "total_amount": edit_total,
+                                                                "fees": edit_fees,
+                                                                "notes": edit_notes
+                                                            }
+                                                            
+                                                            response = make_authenticated_request(
+                                                                "PUT",
+                                                                f"/portfolio/transactions/{txn['id']}",
+                                                                json=update_data
+                                                            )
+                                                            
+                                                            if response.status_code == 200:
+                                                                st.session_state[edit_key] = False
+                                                                st.success("✅ Transaction updated!")
+                                                                st.rerun()
+                                                            else:
+                                                                st.error(f"Failed to update: {response.text}")
+                                                        except Exception as e:
+                                                            st.error(f"Error: {str(e)}")
+                                                    
+                                                    if cancel_btn:
+                                                        st.session_state[edit_key] = False
+                                                        st.rerun()
+                                            
+                                            st.markdown("---")
+                                        else:
+                                            # Normal transaction display
+                                            col1, col2, col3 = st.columns([0.5, 7.5, 2])
+                                            
+                                            with col1:
+                                                is_selected = txn['id'] in st.session_state[f'selected_txns_{ticker}']
+                                                if st.checkbox(
+                                                    "",
+                                                    value=is_selected,
+                                                    key=f"txn_checkbox_{ticker}_{txn['id']}",
+                                                    label_visibility="collapsed"
+                                                ):
+                                                    if txn['id'] not in st.session_state[f'selected_txns_{ticker}']:
+                                                        st.session_state[f'selected_txns_{ticker}'].append(txn['id'])
+                                                else:
+                                                    if txn['id'] in st.session_state[f'selected_txns_{ticker}']:
+                                                        st.session_state[f'selected_txns_{ticker}'].remove(txn['id'])
+                                            
+                                            with col2:
+                                                # Transaction display
+                                                txn_type_emoji = "🟢" if txn['transaction_type'] == "BUY" else "🔴"
+                                                st.markdown(f"**{txn_type_emoji} {txn['transaction_date']}** - {txn['transaction_type']}")
+                                                
+                                                info_col1, info_col2, info_col3, info_col4 = st.columns(4)
+                                                with info_col1:
+                                                    st.caption(f"Qty: {txn['quantity']:.2f}")
+                                                with info_col2:
+                                                    st.caption(f"Price: ${txn['price_per_unit']:.2f}")
+                                                with info_col3:
+                                                    st.caption(f"Total: ${txn['total_amount']:,.2f}")
+                                                with info_col4:
+                                                    st.caption(f"Fees: ${txn['fees']:.2f}")
+                                                
+                                                if txn.get('notes'):
+                                                    st.caption(f"📝 {txn['notes']}")
+                                            
+                                            with col3:
+                                                # Action buttons
+                                                btn_col1, btn_col2 = st.columns(2)
+                                                with btn_col1:
+                                                    if st.button("✏️", key=f"edit_btn_{ticker}_{txn['id']}", help="Edit"):
+                                                        st.session_state[edit_key] = True
+                                                        st.rerun()
+                                                with btn_col2:
+                                                    if st.button("🗑️", key=f"delete_btn_{ticker}_{txn['id']}", help="Delete"):
+                                                        # Set delete confirmation state
+                                                        st.session_state[f'confirm_delete_{ticker}_{txn["id"]}'] = True
+                                                        st.rerun()
+                                            
+                                            # Show delete confirmation if needed
+                                            if st.session_state.get(f'confirm_delete_{ticker}_{txn["id"]}', False):
+                                                st.warning(f"⚠️ Delete this transaction?")
+                                                conf_col1, conf_col2 = st.columns(2)
+                                                with conf_col1:
+                                                    if st.button("✅ Yes, Delete", key=f"confirm_yes_{ticker}_{txn['id']}"):
+                                                        try:
                                                             response = make_authenticated_request(
                                                                 "DELETE",
-                                                                f"/portfolio/transactions/{txn_id}"
+                                                                f"/portfolio/transactions/{txn['id']}"
                                                             )
                                                             
                                                             if response.status_code == 204:
-                                                                deleted_count += 1
+                                                                st.session_state[f'confirm_delete_{ticker}_{txn["id"]}'] = False
+                                                                st.success("✅ Transaction deleted!")
+                                                                st.rerun()
                                                             else:
-                                                                failed_count += 1
-                                                        
-                                                        # Clear selection
-                                                        st.session_state[f'selected_txns_{ticker}'] = []
-                                                        
-                                                        if deleted_count > 0:
-                                                            st.success(f"✅ Successfully deleted {deleted_count} transaction(s)!")
-                                                        if failed_count > 0:
-                                                            st.error(f"❌ Failed to delete {failed_count} transaction(s)")
-                                                        
+                                                                st.error(f"Failed to delete: {response.text}")
+                                                        except Exception as e:
+                                                            st.error(f"Error: {str(e)}")
+                                                with conf_col2:
+                                                    if st.button("❌ Cancel", key=f"confirm_no_{ticker}_{txn['id']}"):
+                                                        st.session_state[f'confirm_delete_{ticker}_{txn["id"]}'] = False
                                                         st.rerun()
-                                                    
-                                                    except Exception as e:
-                                                        st.error(f"Error deleting transactions: {str(e)}")
-                                        
-                                        st.markdown("---")
-                                        
-                                        # Display transactions with individual action buttons
-                                        for txn in transactions_sorted:
-                                            # Check if this transaction is being edited
-                                            edit_key = f'edit_txn_{ticker}_{txn["id"]}'
-                                            is_editing = st.session_state.get(edit_key, False)
                                             
-                                            if is_editing:
-                                                # Show edit form in a container
-                                                with st.container():
-                                                    st.markdown(f"**✏️ Editing Transaction (ID: {txn['id']})**")
-                                                    
-                                                    with st.form(f"edit_form_{ticker}_{txn['id']}"):
-                                                        col1, col2 = st.columns(2)
-                                                        
-                                                        with col1:
-                                                            edit_type = st.selectbox(
-                                                                "Type",
-                                                                ["BUY", "SELL"],
-                                                                index=0 if txn['transaction_type'] == "BUY" else 1,
-                                                                key=f"edit_type_{ticker}_{txn['id']}"
-                                                            )
-                                                            from datetime import datetime as dt
-                                                            txn_date = dt.strptime(txn['transaction_date'], "%Y-%m-%d").date() if isinstance(txn['transaction_date'], str) else txn['transaction_date']
-                                                            edit_date = st.date_input(
-                                                                "Date",
-                                                                value=txn_date,
-                                                                key=f"edit_date_{ticker}_{txn['id']}"
-                                                            )
-                                                            edit_quantity = st.number_input(
-                                                                "Quantity",
-                                                                min_value=0.0,
-                                                                value=float(txn['quantity']),
-                                                                step=0.01,
-                                                                format="%.2f",
-                                                                key=f"edit_qty_{ticker}_{txn['id']}"
-                                                            )
-                                                        
-                                                        with col2:
-                                                            edit_price = st.number_input(
-                                                                "Price/Unit",
-                                                                min_value=0.0,
-                                                                value=float(txn['price_per_unit']),
-                                                                step=0.01,
-                                                                format="%.2f",
-                                                                key=f"edit_price_{ticker}_{txn['id']}"
-                                                            )
-                                                            edit_fees = st.number_input(
-                                                                "Fees",
-                                                                min_value=0.0,
-                                                                value=float(txn['fees']),
-                                                                step=0.01,
-                                                                format="%.2f",
-                                                                key=f"edit_fees_{ticker}_{txn['id']}"
-                                                            )
-                                                            edit_total = st.number_input(
-                                                                "Total",
-                                                                min_value=0.0,
-                                                                value=float(txn['total_amount']),
-                                                                step=0.01,
-                                                                format="%.2f",
-                                                                key=f"edit_total_{ticker}_{txn['id']}"
-                                                            )
-                                                        
-                                                        edit_notes = st.text_area(
-                                                            "Notes",
-                                                            value=txn.get('notes', ''),
-                                                            key=f"edit_notes_{ticker}_{txn['id']}"
-                                                        )
-                                                        
-                                                        col1, col2 = st.columns(2)
-                                                        with col1:
-                                                            save_btn = st.form_submit_button("💾 Save Changes", use_container_width=True)
-                                                        with col2:
-                                                            cancel_btn = st.form_submit_button("❌ Cancel", use_container_width=True)
-                                                        
-                                                        if save_btn:
-                                                            try:
-                                                                update_data = {
-                                                                    "transaction_type": edit_type,
-                                                                    "transaction_date": str(edit_date),
-                                                                    "quantity": edit_quantity,
-                                                                    "price_per_unit": edit_price,
-                                                                    "total_amount": edit_total,
-                                                                    "fees": edit_fees,
-                                                                    "notes": edit_notes
-                                                                }
-                                                                
-                                                                response = make_authenticated_request(
-                                                                    "PUT",
-                                                                    f"/portfolio/transactions/{txn['id']}",
-                                                                    json=update_data
-                                                                )
-                                                                
-                                                                if response.status_code == 200:
-                                                                    st.session_state[edit_key] = False
-                                                                    st.success("✅ Transaction updated!")
-                                                                    st.rerun()
-                                                                else:
-                                                                    st.error(f"Failed to update: {response.text}")
-                                                            except Exception as e:
-                                                                st.error(f"Error: {str(e)}")
-                                                        
-                                                        if cancel_btn:
-                                                            st.session_state[edit_key] = False
-                                                            st.rerun()
-                                                
-                                                st.markdown("---")
-                                            else:
-                                                # Normal transaction display
-                                                col1, col2, col3 = st.columns([0.5, 7.5, 2])
-                                                
-                                                with col1:
-                                                    is_selected = txn['id'] in st.session_state[f'selected_txns_{ticker}']
-                                                    if st.checkbox(
-                                                        "",
-                                                        value=is_selected,
-                                                        key=f"txn_checkbox_{ticker}_{txn['id']}",
-                                                        label_visibility="collapsed"
-                                                    ):
-                                                        if txn['id'] not in st.session_state[f'selected_txns_{ticker}']:
-                                                            st.session_state[f'selected_txns_{ticker}'].append(txn['id'])
-                                                    else:
-                                                        if txn['id'] in st.session_state[f'selected_txns_{ticker}']:
-                                                            st.session_state[f'selected_txns_{ticker}'].remove(txn['id'])
-                                                
-                                                with col2:
-                                                    # Transaction display
-                                                    txn_type_emoji = "🟢" if txn['transaction_type'] == "BUY" else "🔴"
-                                                    st.markdown(f"**{txn_type_emoji} {txn['transaction_date']}** - {txn['transaction_type']}")
-                                                    
-                                                    info_col1, info_col2, info_col3, info_col4 = st.columns(4)
-                                                    with info_col1:
-                                                        st.caption(f"Qty: {txn['quantity']:.2f}")
-                                                    with info_col2:
-                                                        st.caption(f"Price: ${txn['price_per_unit']:.2f}")
-                                                    with info_col3:
-                                                        st.caption(f"Total: ${txn['total_amount']:,.2f}")
-                                                    with info_col4:
-                                                        st.caption(f"Fees: ${txn['fees']:.2f}")
-                                                    
-                                                    if txn.get('notes'):
-                                                        st.caption(f"📝 {txn['notes']}")
-                                                
-                                                with col3:
-                                                    # Action buttons
-                                                    btn_col1, btn_col2 = st.columns(2)
-                                                    with btn_col1:
-                                                        if st.button("✏️", key=f"edit_btn_{ticker}_{txn['id']}", help="Edit"):
-                                                            st.session_state[edit_key] = True
-                                                            st.rerun()
-                                                    with btn_col2:
-                                                        if st.button("🗑️", key=f"delete_btn_{ticker}_{txn['id']}", help="Delete"):
-                                                            # Set delete confirmation state
-                                                            st.session_state[f'confirm_delete_{ticker}_{txn["id"]}'] = True
-                                                            st.rerun()
-                                                
-                                                # Show delete confirmation if needed
-                                                if st.session_state.get(f'confirm_delete_{ticker}_{txn["id"]}', False):
-                                                    st.warning(f"⚠️ Delete this transaction?")
-                                                    conf_col1, conf_col2 = st.columns(2)
-                                                    with conf_col1:
-                                                        if st.button("✅ Yes, Delete", key=f"confirm_yes_{ticker}_{txn['id']}"):
-                                                            try:
-                                                                response = make_authenticated_request(
-                                                                    "DELETE",
-                                                                    f"/portfolio/transactions/{txn['id']}"
-                                                                )
-                                                                
-                                                                if response.status_code == 204:
-                                                                    st.session_state[f'confirm_delete_{ticker}_{txn["id"]}'] = False
-                                                                    st.success("✅ Transaction deleted!")
-                                                                    st.rerun()
-                                                                else:
-                                                                    st.error(f"Failed to delete: {response.text}")
-                                                            except Exception as e:
-                                                                st.error(f"Error: {str(e)}")
-                                                    with conf_col2:
-                                                        if st.button("❌ Cancel", key=f"confirm_no_{ticker}_{txn['id']}"):
-                                                            st.session_state[f'confirm_delete_{ticker}_{txn["id"]}'] = False
-                                                            st.rerun()
-                                                
-                                                st.markdown("---")
-                                    else:
-                                        st.info("No transactions found.")
-                            else:
-                                st.info("No transactions found for this ticker.")
+                                            st.markdown("---")
+                                else:
+                                    st.info("No transactions found.")
+                        else:
+                            st.info("No transactions found for this ticker.")
                     else:
                         # No current holdings (but ticker exists in transaction list)
                         st.info(f"ℹ️ No current holdings for **{ticker}** (all shares may have been sold)")
@@ -4395,6 +4440,351 @@ def portfolio_individual_holdings_page():
         st.error("Cannot connect to API. Make sure the backend is running.")
     except Exception as e:
         st.error(f"Error: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+
+
+def portfolio_allocation_page():
+    """Asset allocation summary page with target vs actual comparison"""
+    st.title("📊 Asset Allocation")
+    st.markdown("---")
+    
+    try:
+        # Get allocation summary
+        response = make_authenticated_request("GET", "/portfolio/allocation/summary")
+        
+        if response.status_code == 200:
+            summary = response.json()
+            
+            # Display total portfolio value
+            st.markdown("### 💰 Total Portfolio Value")
+            st.metric(
+                "Current Value",
+                f"${summary['total_portfolio_value']:,.2f}"
+            )
+            
+            st.markdown("---")
+            
+            # Create tabs for different views
+            tab1, tab2, tab3 = st.tabs(["📊 Allocation Summary", "⚙️ Settings", "🏷️ Ticker Categories"])
+            
+            with tab1:
+                st.markdown("### Asset Allocation Comparison")
+                
+                categories = summary['categories']
+                
+                if categories:
+                    # Prepare data for chart and table
+                    category_names = [c['category'] for c in categories]
+                    target_percentages = [c['target_percentage'] for c in categories]
+                    actual_percentages = [c['actual_percentage'] for c in categories]
+                    differences = [c['difference'] for c in categories]
+                    thresholds = [c['threshold'] for c in categories]
+                    values = [c['current_value'] for c in categories]
+                    needs_rebalancing = [c['needs_rebalancing'] for c in categories]
+                    
+                    # Horizontal Bar Chart
+                    try:
+                        import plotly.graph_objects as go
+                        
+                        fig = go.Figure()
+                        
+                        # Add target bars
+                        fig.add_trace(go.Bar(
+                            name='My Target',
+                            y=category_names,
+                            x=target_percentages,
+                            orientation='h',
+                            marker=dict(color='rgb(85, 141, 221)'),  # Blue
+                            text=[f"{p:.1f}%" for p in target_percentages],
+                            textposition='inside',
+                            textfont=dict(color='white', size=12)
+                        ))
+                        
+                        # Add actual bars
+                        fig.add_trace(go.Bar(
+                            name='Actual',
+                            y=category_names,
+                            x=actual_percentages,
+                            orientation='h',
+                            marker=dict(color='rgb(123, 196, 120)'),  # Green
+                            text=[f"{p:.1f}%" for p in actual_percentages],
+                            textposition='inside',
+                            textfont=dict(color='white', size=12)
+                        ))
+                        
+                        fig.update_layout(
+                            title='Asset Allocation Summary',
+                            title_font_size=18,
+                            xaxis_title='Percentage',
+                            barmode='group',
+                            height=400,
+                            xaxis=dict(range=[0, 100]),
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="right",
+                                x=1
+                            ),
+                            margin=dict(l=150, r=50, t=80, b=50)
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                    except ImportError:
+                        st.warning("Install plotly for visualization: pip install plotly")
+                    
+                    st.markdown("---")
+                    
+                    # Comparison Table
+                    st.markdown("### Detailed Breakdown")
+                    
+                    # Create styled dataframe
+                    try:
+                        import pandas as pd
+                        
+                        table_data = []
+                        for i, category in enumerate(categories):
+                            table_data.append({
+                                "Category": category['category'],
+                                "My Target": f"{category['target_percentage']:.1f}%",
+                                "Actual": f"{category['actual_percentage']:.1f}%",
+                                "Difference": f"{category['difference']:+.2f}%",
+                                "Threshold": f"{category['threshold']:.1f}%",
+                                "Value": f"${category['current_value']:,.2f}",
+                                "Status": "⚠️ Rebalance" if category['needs_rebalancing'] else "✅ On Track"
+                            })
+                        
+                        df = pd.DataFrame(table_data)
+                        
+                        # Apply styling with better contrast for dark mode
+                        def highlight_rebalancing(row):
+                            if "⚠️" in str(row['Status']):
+                                # Use darker red background with white text for better contrast
+                                return ['background-color: #8B0000; color: #FFFFFF; font-weight: bold'] * len(row)
+                            return [''] * len(row)
+                        
+                        styled_df = df.style.apply(highlight_rebalancing, axis=1)
+                        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                        
+                        # Show rebalancing recommendations
+                        rebalancing_needed = [c for c in categories if c['needs_rebalancing']]
+                        if rebalancing_needed:
+                            st.markdown("### 🔄 Rebalancing Recommendations")
+                            for category in rebalancing_needed:
+                                diff = category['difference']
+                                value = category['current_value']
+                                target_value = summary['total_portfolio_value'] * category['target_percentage'] / 100
+                                amount_to_adjust = target_value - value
+                                
+                                if diff > 0:
+                                    st.warning(
+                                        f"**{category['category']}**: Over-allocated by {abs(diff):.2f}%. "
+                                        f"Consider reducing by ~${abs(amount_to_adjust):,.2f}"
+                                    )
+                                else:
+                                    st.info(
+                                        f"**{category['category']}**: Under-allocated by {abs(diff):.2f}%. "
+                                        f"Consider adding ~${abs(amount_to_adjust):,.2f}"
+                                    )
+                        else:
+                            st.success("✅ Your portfolio is well-balanced! All categories are within target thresholds.")
+                        
+                    except ImportError:
+                        # Fallback without pandas
+                        for category in categories:
+                            with st.expander(f"{category['category']} - {'⚠️ Rebalance' if category['needs_rebalancing'] else '✅ On Track'}"):
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.write(f"**Target:** {category['target_percentage']:.1f}%")
+                                    st.write(f"**Actual:** {category['actual_percentage']:.1f}%")
+                                with col2:
+                                    st.write(f"**Difference:** {category['difference']:+.2f}%")
+                                    st.write(f"**Threshold:** {category['threshold']:.1f}%")
+                                with col3:
+                                    st.write(f"**Value:** ${category['current_value']:,.2f}")
+                
+                else:
+                    st.info("No allocation data available. Make sure you have holdings and targets set up.")
+            
+            with tab2:
+                st.markdown("### ⚙️ Allocation Targets")
+                st.write("Set your target allocation percentages and acceptable deviation thresholds.")
+                
+                # Get current targets
+                targets_response = make_authenticated_request("GET", "/portfolio/allocation/targets")
+                
+                if targets_response.status_code == 200:
+                    targets = targets_response.json()
+                    
+                    st.markdown("---")
+                    
+                    for target in targets:
+                        with st.expander(f"**{target['category']}**", expanded=True):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                new_target = st.number_input(
+                                    "Target %",
+                                    min_value=0.0,
+                                    max_value=100.0,
+                                    value=float(target['target_percentage']),
+                                    step=1.0,
+                                    key=f"target_{target['category']}"
+                                )
+                            
+                            with col2:
+                                new_threshold = st.number_input(
+                                    "Threshold %",
+                                    min_value=0.0,
+                                    max_value=100.0,
+                                    value=float(target['threshold_percentage']),
+                                    step=0.5,
+                                    key=f"threshold_{target['category']}"
+                                )
+                            
+                            if st.button(f"Update {target['category']}", key=f"update_{target['category']}"):
+                                try:
+                                    update_data = {
+                                        "target_percentage": new_target,
+                                        "threshold_percentage": new_threshold
+                                    }
+                                    
+                                    update_response = make_authenticated_request(
+                                        "PUT",
+                                        f"/portfolio/allocation/targets/{target['category']}",
+                                        json=update_data
+                                    )
+                                    
+                                    if update_response.status_code == 200:
+                                        st.success(f"✅ Updated {target['category']} targets!")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Failed to update: {update_response.text}")
+                                except Exception as e:
+                                    st.error(f"Error updating target: {str(e)}")
+                    
+                    # Validation check
+                    total_target = sum(t['target_percentage'] for t in targets)
+                    if abs(total_target - 100.0) > 0.01:
+                        st.warning(f"⚠️ **Note:** Your targets currently add up to {total_target:.1f}%. They should total 100%.")
+                    else:
+                        st.success(f"✅ Your targets add up to {total_target:.1f}%")
+                
+                else:
+                    st.error("Failed to load allocation targets.")
+            
+            with tab3:
+                st.markdown("### 🏷️ Ticker Categorization")
+                st.write("View and adjust how your tickers are categorized. Tickers are automatically categorized using market data.")
+                
+                # Get ticker categories
+                categories_response = make_authenticated_request("GET", "/portfolio/allocation/ticker-categories")
+                
+                if categories_response.status_code == 200:
+                    ticker_categories = categories_response.json()
+                    
+                    if ticker_categories:
+                        st.markdown("---")
+                        
+                        # Sort by category
+                        ticker_categories_sorted = sorted(ticker_categories, key=lambda x: (x['category'], x['ticker']))
+                        
+                        # Group by category
+                        from itertools import groupby
+                        
+                        for category, tickers_in_category in groupby(ticker_categories_sorted, key=lambda x: x['category']):
+                            tickers_list = list(tickers_in_category)
+                            
+                            with st.expander(f"**{category}** ({len(tickers_list)} tickers)", expanded=False):
+                                for ticker_cat in tickers_list:
+                                    col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
+                                    
+                                    with col1:
+                                        # Display ticker with full name if available
+                                        ticker_name = ticker_cat.get('ticker_name')
+                                        if ticker_name:
+                                            st.write(f"**{ticker_cat['ticker']}**")
+                                            st.caption(ticker_name)
+                                        else:
+                                            st.write(f"**{ticker_cat['ticker']}**")
+                                    
+                                    with col2:
+                                        auto_label = "🤖 Auto" if ticker_cat['is_auto_categorized'] else "✋ Manual"
+                                        st.write(auto_label)
+                                    
+                                    with col3:
+                                        new_category = st.selectbox(
+                                            "Change to:",
+                                            ["US Stocks", "International Stocks", "Bonds", "Cash"],
+                                            index=["US Stocks", "International Stocks", "Bonds", "Cash"].index(ticker_cat['category']),
+                                            key=f"cat_select_{ticker_cat['ticker']}",
+                                            label_visibility="collapsed"
+                                        )
+                                    
+                                    with col4:
+                                        if new_category != ticker_cat['category']:
+                                            if st.button("Update", key=f"update_cat_{ticker_cat['ticker']}"):
+                                                try:
+                                                    update_data = {
+                                                        "category": new_category,
+                                                        "is_auto_categorized": False
+                                                    }
+                                                    
+                                                    update_response = make_authenticated_request(
+                                                        "PUT",
+                                                        f"/portfolio/allocation/ticker-categories/{ticker_cat['ticker']}",
+                                                        json=update_data
+                                                    )
+                                                    
+                                                    if update_response.status_code == 200:
+                                                        st.success(f"✅ Updated {ticker_cat['ticker']}!")
+                                                        st.rerun()
+                                                    else:
+                                                        st.error(f"Failed: {update_response.text}")
+                                                except Exception as e:
+                                                    st.error(f"Error: {str(e)}")
+                                        else:
+                                            if ticker_cat['is_auto_categorized'] and st.button("Re-scan", key=f"rescan_{ticker_cat['ticker']}"):
+                                                try:
+                                                    rescan_response = make_authenticated_request(
+                                                        "POST",
+                                                        f"/portfolio/allocation/ticker-categories/recategorize/{ticker_cat['ticker']}"
+                                                    )
+                                                    
+                                                    if rescan_response.status_code == 200:
+                                                        st.success(f"✅ Re-scanned {ticker_cat['ticker']}!")
+                                                        st.rerun()
+                                                    else:
+                                                        st.error(f"Failed: {rescan_response.text}")
+                                                except Exception as e:
+                                                    st.error(f"Error: {str(e)}")
+                    else:
+                        st.info("No ticker categories found. Add transactions to see your tickers here.")
+                
+                else:
+                    st.error("Failed to load ticker categories.")
+        
+        elif response.status_code == 404:
+            st.warning("⚠️ Allocation targets not set up yet. Running migration to initialize...")
+            st.info("Please run the migration script: `python migrate_add_asset_allocation.py`")
+            
+            st.markdown("---")
+            st.markdown("### Quick Setup")
+            st.write("Default targets will be:")
+            st.write("- **US Stocks**: 70% (±5%)")
+            st.write("- **International Stocks**: 25% (±5%)")
+            st.write("- **Bonds**: 0% (±0%)")
+            st.write("- **Cash**: 5% (±1%)")
+        
+        else:
+            st.error(f"Failed to load allocation summary: {response.text}")
+    
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot connect to API. Make sure the backend is running.")
+    except Exception as e:
+        st.error(f"Error loading allocation: {str(e)}")
         import traceback
         st.code(traceback.format_exc())
 

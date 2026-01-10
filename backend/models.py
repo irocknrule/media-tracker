@@ -114,3 +114,26 @@ class PortfolioTransaction(Base):
     asset_type = Column(String, nullable=False)  # "STOCK", "ETF", or "MUTUAL_FUND"
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
+class AssetAllocationTarget(Base):
+    __tablename__ = "asset_allocation_targets"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    category = Column(String, nullable=False, unique=True, index=True)  # "US Stocks", "International Stocks", "Bonds", "Cash"
+    target_percentage = Column(Float, nullable=False)  # Target allocation percentage (0-100)
+    threshold_percentage = Column(Float, nullable=False, default=5.0)  # Acceptable deviation threshold
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TickerCategory(Base):
+    __tablename__ = "ticker_categories"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    ticker = Column(String, nullable=False, unique=True, index=True)  # Stock ticker symbol
+    category = Column(String, nullable=False, index=True)  # "US Stocks", "International Stocks", "Bonds", "Cash"
+    is_auto_categorized = Column(Boolean, default=True)  # Whether this was auto-detected or manually set
+    notes = Column(String)  # Optional notes about the categorization
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
