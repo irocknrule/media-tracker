@@ -104,19 +104,20 @@ def get_available_years(
     
     # Get years from movies
     movies = db.query(Movie).all()
-    years.update(m.watched_date.year for m in movies)
+    years.update(m.watched_date.year for m in movies if m.watched_date)
     
-    # Get years from TV shows
-    tv_shows = db.query(TVShow).all()
-    years.update(t.watched_date.year for t in tv_shows)
+    # Get years from TV shows (note: TVShow doesn't have watched_date, seasons do)
+    # This will need to be handled separately if needed
+    # tv_shows = db.query(TVShow).all()
+    # years.update(t.watched_date.year for t in tv_shows if t.watched_date)
     
     # Get years from books
     books = db.query(Book).all()
-    years.update(b.finished_date.year for b in books)
+    years.update(b.finished_date.year for b in books if b.finished_date)
     
     # Get years from music
     music = db.query(Music).all()
-    years.update(m.listened_date.year for m in music)
+    years.update(m.listened_date.year for m in music if m.listened_date)
     
     return {"years": sorted(list(years), reverse=True)}
 

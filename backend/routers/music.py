@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import desc, nullslast
 from typing import List, Optional
 from datetime import date
 from backend.database import get_db
@@ -19,10 +20,15 @@ def get_music(
     """Get all music entries with optional filtering"""
     query = db.query(MusicModel)
     if year:
-        query = query.filter(MusicModel.listened_date >= date(year, 1, 1)).filter(
+        query = query.filter(MusicModel.listened_date.isnot(None)).filter(
+            MusicModel.listened_date >= date(year, 1, 1),
             MusicModel.listened_date <= date(year, 12, 31)
         )
-    music = query.order_by(MusicModel.listened_date.desc()).offset(skip).limit(limit).all()
+    # Order by listened_date desc (NULLs last), then by created_at desc as fallback
+    music = query.order_by(
+        nullslast(desc(MusicModel.listened_date)),
+        desc(MusicModel.created_at)
+    ).offset(skip).limit(limit).all()
     return music
 
 

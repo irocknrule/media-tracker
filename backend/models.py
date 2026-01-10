@@ -21,7 +21,8 @@ class Movie(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, nullable=False, index=True)
     year = Column(Integer)
-    watched_date = Column(Date, nullable=False, index=True)
+    watched_date = Column(Date, nullable=True, index=True)
+    status = Column(String, default="watched", index=True)  # "currently_watching", "want_to_watch", "watched", "dropped"
     rating = Column(Float)
     notes = Column(String)
     thumbnail_url = Column(String)
@@ -37,6 +38,7 @@ class TVShow(Base):
     genres = Column(String)  # Comma-separated genres
     overall_rating = Column(Float)  # Overall show rating
     show_thumbnail_url = Column(String)  # Overall show poster
+    status = Column(String, default="watched", index=True)  # "currently_watching", "want_to_watch", "watched", "dropped"
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationship to seasons
@@ -49,7 +51,7 @@ class TVShowSeason(Base):
     id = Column(Integer, primary_key=True, index=True)
     show_id = Column(Integer, ForeignKey("tv_shows.id"), nullable=False, index=True)
     season_number = Column(Integer, nullable=False)
-    watched_date = Column(Date, nullable=False, index=True)
+    watched_date = Column(Date, nullable=True, index=True)  # Nullable to support in-progress status
     rating = Column(Float)
     notes = Column(String)
     season_thumbnail_url = Column(String)  # Individual season poster
@@ -65,7 +67,8 @@ class Book(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, nullable=False, index=True)
     author = Column(String, index=True)
-    finished_date = Column(Date, nullable=False, index=True)
+    finished_date = Column(Date, nullable=True, index=True)
+    status = Column(String, default="finished", index=True)  # "currently_reading", "want_to_read", "finished", "dropped"
     rating = Column(Float)
     notes = Column(String)
     thumbnail_url = Column(String)
@@ -80,7 +83,8 @@ class Music(Base):
     title = Column(String, nullable=False, index=True)
     artist = Column(String, index=True)
     album = Column(String)
-    listened_date = Column(Date, nullable=False, index=True)
+    listened_date = Column(Date, nullable=True, index=True)
+    status = Column(String, default="listened", index=True)  # "currently_listening", "want_to_listen", "listened", "dropped"
     rating = Column(Float)
     notes = Column(String)
     thumbnail_url = Column(String)

@@ -27,6 +27,7 @@ def get_tv_shows(
     if year:
         # Filter by year if provided (looking at seasons' watched dates)
         query = query.join(TVShowSeasonModel).filter(
+            TVShowSeasonModel.watched_date.isnot(None),
             TVShowSeasonModel.watched_date >= date(year, 1, 1),
             TVShowSeasonModel.watched_date <= date(year, 12, 31)
         ).distinct()
@@ -197,12 +198,16 @@ def create_tv_show_legacy(
         # Update thumbnail if provided
         if tv_show.thumbnail_url:
             existing_show.show_thumbnail_url = tv_show.thumbnail_url
-            db.commit()
+        # Update status if provided
+        if tv_show.status:
+            existing_show.status = tv_show.status
+        db.commit()
     else:
         # Create new show
         new_show = TVShowModel(
             title=tv_show.title,
-            show_thumbnail_url=tv_show.thumbnail_url
+            show_thumbnail_url=tv_show.thumbnail_url,
+            status=tv_show.status or "watched"
         )
         db.add(new_show)
         db.commit()

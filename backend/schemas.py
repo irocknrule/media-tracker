@@ -27,7 +27,8 @@ class Token(BaseModel):
 class MovieBase(BaseModel):
     title: str
     year: Optional[int] = None
-    watched_date: date
+    watched_date: Optional[date] = None
+    status: Optional[str] = "watched"  # "currently_watching", "want_to_watch", "watched", "dropped"
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
     thumbnail_url: Optional[str] = None
@@ -41,6 +42,7 @@ class MovieUpdate(BaseModel):
     title: Optional[str] = None
     year: Optional[int] = None
     watched_date: Optional[date] = None
+    status: Optional[str] = None
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
     thumbnail_url: Optional[str] = None
@@ -57,7 +59,7 @@ class Movie(MovieBase):
 # TV Show schemas
 class TVShowSeasonBase(BaseModel):
     season_number: int
-    watched_date: date
+    watched_date: Optional[date] = None  # Nullable to support in-progress status
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
     season_thumbnail_url: Optional[str] = None
@@ -90,6 +92,7 @@ class TVShowBase(BaseModel):
     genres: Optional[str] = None
     overall_rating: Optional[float] = Field(None, ge=0, le=10)
     show_thumbnail_url: Optional[str] = None
+    status: Optional[str] = "watched"  # "currently_watching", "want_to_watch", "watched", "dropped"
 
 
 class TVShowCreate(TVShowBase):
@@ -102,6 +105,7 @@ class TVShowUpdate(BaseModel):
     genres: Optional[str] = None
     overall_rating: Optional[float] = Field(None, ge=0, le=10)
     show_thumbnail_url: Optional[str] = None
+    status: Optional[str] = None
 
 
 class TVShow(TVShowBase):
@@ -117,7 +121,8 @@ class TVShow(TVShowBase):
 class TVShowLegacyBase(BaseModel):
     title: str
     season: Optional[int] = None
-    watched_date: date
+    watched_date: Optional[date] = None
+    status: Optional[str] = "watched"  # "currently_watching", "want_to_watch", "watched", "dropped"
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
     thumbnail_url: Optional[str] = None
@@ -131,7 +136,8 @@ class TVShowLegacyCreate(TVShowLegacyBase):
 class BookBase(BaseModel):
     title: str
     author: Optional[str] = None
-    finished_date: date
+    finished_date: Optional[date] = None
+    status: Optional[str] = "finished"  # "currently_reading", "want_to_read", "finished", "dropped"
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
     thumbnail_url: Optional[str] = None
@@ -146,6 +152,7 @@ class BookUpdate(BaseModel):
     title: Optional[str] = None
     author: Optional[str] = None
     finished_date: Optional[date] = None
+    status: Optional[str] = None
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
     thumbnail_url: Optional[str] = None
@@ -165,7 +172,8 @@ class MusicBase(BaseModel):
     title: str
     artist: Optional[str] = None
     album: Optional[str] = None
-    listened_date: date
+    listened_date: Optional[date] = None
+    status: Optional[str] = "listened"  # "currently_listening", "want_to_listen", "listened", "dropped"
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
     thumbnail_url: Optional[str] = None
@@ -180,6 +188,7 @@ class MusicUpdate(BaseModel):
     artist: Optional[str] = None
     album: Optional[str] = None
     listened_date: Optional[date] = None
+    status: Optional[str] = None
     rating: Optional[float] = Field(None, ge=0, le=10)
     notes: Optional[str] = None
     thumbnail_url: Optional[str] = None

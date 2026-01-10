@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import desc, nullslast
 from typing import List, Optional
 from datetime import date
 from backend.database import get_db
@@ -19,10 +20,15 @@ def get_movies(
     """Get all movies with optional filtering"""
     query = db.query(MovieModel)
     if year:
-        query = query.filter(MovieModel.watched_date >= date(year, 1, 1)).filter(
+        query = query.filter(MovieModel.watched_date.isnot(None)).filter(
+            MovieModel.watched_date >= date(year, 1, 1),
             MovieModel.watched_date <= date(year, 12, 31)
         )
-    movies = query.order_by(MovieModel.watched_date.desc()).offset(skip).limit(limit).all()
+    # Order by watched_date desc (NULLs last), then by created_at desc as fallback
+    movies = query.order_by(
+        nullslast(desc(MovieModel.watched_date)),
+        desc(MovieModel.created_at)
+    ).offset(skip).limit(limit).all()
     return movies
 
 

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import desc, nullslast
 from typing import List, Optional
 from datetime import date
 from backend.database import get_db
@@ -19,10 +20,15 @@ def get_books(
     """Get all books with optional filtering"""
     query = db.query(BookModel)
     if year:
-        query = query.filter(BookModel.finished_date >= date(year, 1, 1)).filter(
+        query = query.filter(BookModel.finished_date.isnot(None)).filter(
+            BookModel.finished_date >= date(year, 1, 1),
             BookModel.finished_date <= date(year, 12, 31)
         )
-    books = query.order_by(BookModel.finished_date.desc()).offset(skip).limit(limit).all()
+    # Order by finished_date desc (NULLs last), then by created_at desc as fallback
+    books = query.order_by(
+        nullslast(desc(BookModel.finished_date)),
+        desc(BookModel.created_at)
+    ).offset(skip).limit(limit).all()
     return books
 
 

@@ -169,6 +169,9 @@ def migrate_add_habits():
 def migrate_add_habits():
     """Migration: Create habit_logs table"""
     # Import here to avoid circular imports
+    import sys
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
     from migrate_add_habits import migrate_add_habits as run_migration
     run_migration()
 
@@ -176,6 +179,9 @@ def migrate_add_habits():
 def migrate_add_portfolio():
     """Migration: Create portfolio_transactions table"""
     # Import here to avoid circular imports
+    import sys
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
     from migrate_add_portfolio import migrate_add_portfolio as run_migration
     run_migration()
 

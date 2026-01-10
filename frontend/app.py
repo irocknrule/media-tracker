@@ -666,11 +666,13 @@ def movies_page():
         # Initialize form values from selected result
         default_title = ""
         default_year = date.today().year
+        default_thumbnail = None
         
         # Check session state for selected result
         if "movie_selected_result" in st.session_state:
             selected_result = st.session_state["movie_selected_result"]
             default_title = selected_result.get("title", "")
+            default_thumbnail = selected_result.get("thumbnail", None)
             year_str = selected_result.get("year", "")
             if year_str:
                 try:
@@ -684,7 +686,8 @@ def movies_page():
         with st.form("add_movie_form"):
             title = st.text_input("Title *", value=default_title, placeholder="Movie title")
             year = st.number_input("Year", min_value=1900, max_value=date.today().year + 1, value=default_year)
-            watched_date = st.date_input("Watched Date *", value=date.today())
+            status = st.selectbox("Status *", ["currently_watching", "want_to_watch", "watched", "dropped"], index=2, key="movie_status", help="Current watching status")
+            watched_date = st.date_input("Watched Date", value=None, key="movie_date", help="Optional: Date when you watched")
             rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5)
             notes = st.text_area("Notes", placeholder="Optional notes about the movie")
             
@@ -697,9 +700,11 @@ def movies_page():
                     data = {
                         "title": title,
                         "year": int(year) if year else None,
-                        "watched_date": str(watched_date),
+                        "status": status,
+                        "watched_date": str(watched_date) if watched_date else None,
                         "rating": float(rating) if rating else None,
-                        "notes": notes if notes else None
+                        "notes": notes if notes else None,
+                        "thumbnail_url": default_thumbnail if default_thumbnail and default_thumbnail.strip() else None
                     }
                     try:
                         response = make_authenticated_request("POST", "/movies/", json=data)
@@ -1013,8 +1018,8 @@ def tv_shows_page():
                                 st.write(f"**{season_name}**")
                                 
                                 # Episode count
-                                episode_count = season.get("episode_count", 0)
-                                if episode_count > 0:
+                                episode_count = season.get("episode_count") or 0
+                                if episode_count and episode_count > 0:
                                     st.caption(f"{episode_count} episodes")
                                 
                                 # Select button
@@ -1032,7 +1037,8 @@ def tv_shows_page():
                         with st.form("add_tv_show_form"):
                             title = st.text_input("Title *", value=selected_result.get("title", ""), placeholder="TV Show title")
                             season = st.number_input("Season", min_value=1, value=selected_season.get("number", 1), disabled=True)
-                            watched_date = st.date_input("Watched Date *", value=date.today(), key="tv_date")
+                            status = st.selectbox("Show Status *", ["currently_watching", "want_to_watch", "watched", "dropped"], index=2, key="tv_status", help="Current watching status for the show")
+                            watched_date = st.date_input("Watched Date", value=None, key="tv_date", help="Optional: Date when you watched this season")
                             rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="tv_rating")
                             notes = st.text_area("Notes", placeholder="Optional notes", key="tv_notes")
                             
@@ -1045,7 +1051,8 @@ def tv_shows_page():
                                     data = {
                                         "title": title,
                                         "season": int(season) if season else None,
-                                        "watched_date": str(watched_date),
+                                        "status": status,
+                                        "watched_date": str(watched_date) if watched_date else None,
                                         "rating": float(rating) if rating else None,
                                         "notes": notes if notes else None,
                                         "thumbnail_url": selected_season.get("image", "") if selected_season.get("image") else None
@@ -1076,7 +1083,8 @@ def tv_shows_page():
                 with st.form("add_tv_show_form_fallback"):
                     title = st.text_input("Title *", value=default_title, placeholder="TV Show title")
                     season = st.number_input("Season", min_value=1, value=1)
-                    watched_date = st.date_input("Watched Date *", value=date.today(), key="tv_date_fallback")
+                    status = st.selectbox("Show Status *", ["currently_watching", "want_to_watch", "watched", "dropped"], index=2, key="tv_status_fallback", help="Current watching status for the show")
+                    watched_date = st.date_input("Watched Date", value=None, key="tv_date_fallback", help="Optional: Date when you watched this season")
                     rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="tv_rating_fallback")
                     notes = st.text_area("Notes", placeholder="Optional notes", key="tv_notes_fallback")
                     
@@ -1089,7 +1097,8 @@ def tv_shows_page():
                             data = {
                                 "title": title,
                                 "season": int(season) if season else None,
-                                "watched_date": str(watched_date),
+                                "status": status,
+                                "watched_date": str(watched_date) if watched_date else None,
                                 "rating": float(rating) if rating else None,
                                 "notes": notes if notes else None
                             }
@@ -1109,9 +1118,10 @@ def tv_shows_page():
             with st.form("add_tv_show_form"):
                 title = st.text_input("Title *", placeholder="TV Show title")
                 season = st.number_input("Season", min_value=1, value=1)
-                watched_date = st.date_input("Watched Date *", value=date.today(), key="tv_date")
-                rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="tv_rating")
-                notes = st.text_area("Notes", placeholder="Optional notes", key="tv_notes")
+                status = st.selectbox("Show Status *", ["currently_watching", "want_to_watch", "watched", "dropped"], index=2, key="tv_status_manual", help="Current watching status for the show")
+                watched_date = st.date_input("Watched Date", value=None, key="tv_date_manual", help="Optional: Date when you watched this season")
+                rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="tv_rating_manual")
+                notes = st.text_area("Notes", placeholder="Optional notes", key="tv_notes_manual")
                 
                 submit = st.form_submit_button("Add TV Show Season")
                 
@@ -1122,7 +1132,8 @@ def tv_shows_page():
                         data = {
                             "title": title,
                             "season": int(season) if season else None,
-                            "watched_date": str(watched_date),
+                            "status": status,
+                            "watched_date": str(watched_date) if watched_date else None,
                             "rating": float(rating) if rating else None,
                             "notes": notes if notes else None
                         }
@@ -1282,16 +1293,19 @@ def books_page():
         # Initialize form values from selected result
         default_title = ""
         default_author = ""
+        default_thumbnail = None
         if "book_selected_result" in st.session_state:
             selected_result = st.session_state["book_selected_result"]
             default_title = selected_result.get("title", "")
             default_author = selected_result.get("author", "")
+            default_thumbnail = selected_result.get("thumbnail", None)
         
         with st.form("add_book_form"):
             title = st.text_input("Title *", value=default_title, placeholder="Book title")
             author = st.text_input("Author", value=default_author, placeholder="Author name")
             pages = st.number_input("Number of Pages", min_value=1, value=None, step=1, key="book_pages", help="Optional: Enter the total number of pages")
-            finished_date = st.date_input("Finished Date *", value=date.today(), key="book_date")
+            status = st.selectbox("Status *", ["currently_reading", "want_to_read", "finished", "dropped"], index=2, key="book_status", help="Current reading status")
+            finished_date = st.date_input("Finished Date", value=None, key="book_date", help="Optional: Date when you finished reading")
             rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="book_rating")
             notes = st.text_area("Notes", placeholder="Optional notes", key="book_notes")
             
@@ -1305,9 +1319,11 @@ def books_page():
                         "title": title,
                         "author": author if author else None,
                         "pages": int(pages) if pages else None,
-                        "finished_date": str(finished_date),
+                        "status": status,
+                        "finished_date": str(finished_date) if finished_date else None,
                         "rating": float(rating) if rating else None,
-                        "notes": notes if notes else None
+                        "notes": notes if notes else None,
+                        "thumbnail_url": default_thumbnail if default_thumbnail and default_thumbnail.strip() else None
                     }
                     try:
                         response = make_authenticated_request("POST", "/books/", json=data)
@@ -1466,16 +1482,19 @@ def music_page():
         # Initialize form values from selected result
         default_title = ""
         default_artist = ""
+        default_thumbnail = None
         if "music_selected_result" in st.session_state:
             selected_result = st.session_state["music_selected_result"]
             default_title = selected_result.get("title", "")
             default_artist = selected_result.get("artist", "")
+            default_thumbnail = selected_result.get("thumbnail", None)
         
         with st.form("add_music_form"):
             title = st.text_input("Title *", value=default_title, placeholder="Song/Album/Band name")
             artist = st.text_input("Artist/Band", value=default_artist, placeholder="Artist or band name")
             album = st.text_input("Album", placeholder="Album name (if applicable)")
-            listened_date = st.date_input("Listened Date *", value=date.today(), key="music_date")
+            status = st.selectbox("Status *", ["currently_listening", "want_to_listen", "listened", "dropped"], index=2, key="music_status", help="Current listening status")
+            listened_date = st.date_input("Listened Date", value=None, key="music_date", help="Optional: Date when you listened")
             rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="music_rating")
             notes = st.text_area("Notes", placeholder="Optional notes", key="music_notes")
             
@@ -1489,9 +1508,11 @@ def music_page():
                         "title": title,
                         "artist": artist if artist else None,
                         "album": album if album else None,
-                        "listened_date": str(listened_date),
+                        "status": status,
+                        "listened_date": str(listened_date) if listened_date else None,
                         "rating": float(rating) if rating else None,
-                        "notes": notes if notes else None
+                        "notes": notes if notes else None,
+                        "thumbnail_url": default_thumbnail if default_thumbnail and default_thumbnail.strip() else None
                     }
                     try:
                         response = make_authenticated_request("POST", "/music/", json=data)
@@ -1527,7 +1548,8 @@ def manual_entry_page():
             st.subheader("Movie Details")
             title = st.text_input("Title *", placeholder="Movie title")
             year = st.number_input("Year", min_value=1900, max_value=date.today().year + 1, value=date.today().year)
-            watched_date = st.date_input("Watched Date *", value=date.today())
+            status = st.selectbox("Status *", ["currently_watching", "want_to_watch", "watched", "dropped"], index=2, key="manual_movie_status", help="Current watching status")
+            watched_date = st.date_input("Watched Date", value=None, key="manual_movie_date", help="Optional: Date when you watched")
             rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5)
             notes = st.text_area("Notes", placeholder="Optional notes")
             
@@ -1570,7 +1592,8 @@ def manual_entry_page():
                     data = {
                         "title": title,
                         "year": int(year) if year else None,
-                        "watched_date": str(watched_date),
+                        "status": status,
+                        "watched_date": str(watched_date) if watched_date else None,
                         "rating": float(rating) if rating else None,
                         "notes": notes if notes else None,
                         "thumbnail_url": thumbnail_url
@@ -1599,6 +1622,7 @@ def manual_entry_page():
                 show_title = st.text_input("Show Title *", placeholder="e.g., Party Down", key="manual_tv_show_title")
                 show_year = st.number_input("Show Year", min_value=1900, max_value=date.today().year + 1, value=date.today().year, key="manual_tv_show_year")
                 show_genres = st.text_input("Genres (comma-separated)", placeholder="e.g., Comedy, Drama", key="manual_tv_genres")
+                show_status = st.selectbox("Show Status *", ["currently_watching", "want_to_watch", "watched", "dropped"], index=2, key="manual_tv_show_status", help="Current watching status for the show")
                 show_overall_rating = st.slider("Overall Show Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="manual_tv_overall_rating")
             
             with col2:
@@ -1625,7 +1649,7 @@ def manual_entry_page():
             
             with col1:
                 season_number = st.number_input("Season Number *", min_value=1, value=1, key="manual_tv_season")
-                watched_date = st.date_input("Watched Date *", value=date.today(), key="manual_tv_watched_date")
+                watched_date = st.date_input("Watched Date", value=None, key="manual_tv_watched_date", help="Optional: Date when you watched this season")
                 season_rating = st.slider("Season Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="manual_tv_season_rating")
                 season_notes = st.text_area("Season Notes", placeholder="Optional notes about this season", key="manual_tv_season_notes")
             
@@ -1693,6 +1717,7 @@ def manual_entry_page():
                                         "year": int(show_year) if show_year else None,
                                         "genres": show_genres if show_genres else None,
                                         "overall_rating": float(show_overall_rating) if show_overall_rating else None,
+                                        "status": show_status,
                                     }
                                     if show_poster_url:
                                         update_data["show_thumbnail_url"] = show_poster_url
@@ -1706,6 +1731,7 @@ def manual_entry_page():
                                 "year": int(show_year) if show_year else None,
                                 "genres": show_genres if show_genres else None,
                                 "overall_rating": float(show_overall_rating) if show_overall_rating else None,
+                                "status": show_status,
                                 "show_thumbnail_url": show_poster_url
                             }
                             show_response = make_authenticated_request("POST", "/tv-shows/", json=show_data)
@@ -1719,7 +1745,7 @@ def manual_entry_page():
                         season_data = {
                             "show_id": show_id,
                             "season_number": int(season_number),
-                            "watched_date": str(watched_date),
+                            "watched_date": str(watched_date) if watched_date else None,
                             "rating": float(season_rating) if season_rating else None,
                             "notes": season_notes if season_notes else None,
                             "season_thumbnail_url": season_poster_url
@@ -1743,7 +1769,8 @@ def manual_entry_page():
             title = st.text_input("Title *", placeholder="Book title")
             author = st.text_input("Author", placeholder="Author name")
             pages = st.number_input("Number of Pages", min_value=1, value=None, step=1, key="manual_book_pages", help="Optional: Enter the total number of pages")
-            finished_date = st.date_input("Finished Date *", value=date.today(), key="manual_book_date")
+            status = st.selectbox("Status *", ["currently_reading", "want_to_read", "finished", "dropped"], index=2, key="manual_book_status", help="Current reading status")
+            finished_date = st.date_input("Finished Date", value=None, key="manual_book_date", help="Optional: Date when you finished reading")
             rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="manual_book_rating")
             notes = st.text_area("Notes", placeholder="Optional notes", key="manual_book_notes")
             
@@ -1784,7 +1811,8 @@ def manual_entry_page():
                         "title": title,
                         "author": author if author else None,
                         "pages": int(pages) if pages else None,
-                        "finished_date": str(finished_date),
+                        "status": status,
+                        "finished_date": str(finished_date) if finished_date else None,
                         "rating": float(rating) if rating else None,
                         "notes": notes if notes else None,
                         "thumbnail_url": thumbnail_url
@@ -1805,7 +1833,8 @@ def manual_entry_page():
             title = st.text_input("Title *", placeholder="Song/Album/Band name")
             artist = st.text_input("Artist/Band", placeholder="Artist or band name")
             album = st.text_input("Album", placeholder="Album name (if applicable)")
-            listened_date = st.date_input("Listened Date *", value=date.today(), key="manual_music_date")
+            status = st.selectbox("Status *", ["currently_listening", "want_to_listen", "listened", "dropped"], index=2, key="manual_music_status", help="Current listening status")
+            listened_date = st.date_input("Listened Date", value=None, key="manual_music_date", help="Optional: Date when you listened")
             rating = st.slider("Rating (0-10)", 0.0, 10.0, 5.0, 0.5, key="manual_music_rating")
             notes = st.text_area("Notes", placeholder="Optional notes", key="manual_music_notes")
             
@@ -1846,7 +1875,8 @@ def manual_entry_page():
                         "title": title,
                         "artist": artist if artist else None,
                         "album": album if album else None,
-                        "listened_date": str(listened_date),
+                        "status": status,
+                        "listened_date": str(listened_date) if listened_date else None,
                         "rating": float(rating) if rating else None,
                         "notes": notes if notes else None,
                         "thumbnail_url": thumbnail_url
@@ -4768,7 +4798,7 @@ def portfolio_allocation_page():
         
         elif response.status_code == 404:
             st.warning("⚠️ Allocation targets not set up yet. Running migration to initialize...")
-            st.info("Please run the migration script: `python migrate_add_asset_allocation.py`")
+            st.info("Please run the migration script: `python scripts/migrate_add_asset_allocation.py`")
             
             st.markdown("---")
             st.markdown("### Quick Setup")
