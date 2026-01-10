@@ -5223,7 +5223,21 @@ def exercises_page():
                                             index=(["", "Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Glutes", "Upper Back", "Lower Back", "Hamstrings", "Quadriceps", "Calves", "Biceps", "Triceps", "Forearms"].index(exercise.get('primary_muscle', '')) if exercise.get('primary_muscle') in ["", "Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Glutes", "Upper Back", "Lower Back", "Hamstrings", "Quadriceps", "Calves", "Biceps", "Triceps", "Forearms"] else 0),
                                             key=f"edit_primary_{exercise['id']}"
                                         )
-                                        edit_image_url = st.text_input("Image URL (optional)", value=exercise.get('image_url', ''), placeholder="https://example.com/exercise.gif", key=f"edit_image_{exercise['id']}")
+                                        
+                                        # Image upload or URL
+                                        st.markdown("**Exercise Image/GIF:**")
+                                        image_option = st.radio("Choose image source:", ["Keep current", "Upload new image", "Enter URL"], key=f"img_option_{exercise['id']}", horizontal=True)
+                                        
+                                        uploaded_image = None
+                                        edit_image_url = exercise.get('image_url', '')
+                                        
+                                        if image_option == "Upload new image":
+                                            uploaded_image = st.file_uploader("Upload Image/GIF", type=['png', 'jpg', 'jpeg', 'gif', 'webp'], key=f"upload_img_{exercise['id']}")
+                                            if uploaded_image:
+                                                st.image(uploaded_image, width=200, caption="Preview")
+                                        elif image_option == "Enter URL":
+                                            edit_image_url = st.text_input("Image URL", value=exercise.get('image_url', ''), placeholder="https://example.com/exercise.gif", key=f"edit_image_{exercise['id']}")
+                                        
                                         edit_notes = st.text_area("Notes", value=exercise.get('notes', ''), key=f"edit_notes_{exercise['id']}")
                                         
                                         col_save, col_cancel = st.columns(2)
@@ -5233,11 +5247,27 @@ def exercises_page():
                                             cancel_button = st.form_submit_button("❌ Cancel", use_container_width=True)
                                         
                                         if save_button:
+                                            # Handle image upload
+                                            final_image_url = edit_image_url
+                                            if uploaded_image is not None:
+                                                file_bytes = uploaded_image.read()
+                                                file_base64 = base64.b64encode(file_bytes).decode('utf-8')
+                                                file_extension = uploaded_image.name.split('.')[-1].lower()
+                                                mime_types = {
+                                                    'png': 'image/png',
+                                                    'jpg': 'image/jpeg',
+                                                    'jpeg': 'image/jpeg',
+                                                    'gif': 'image/gif',
+                                                    'webp': 'image/webp'
+                                                }
+                                                mime_type = mime_types.get(file_extension, 'image/jpeg')
+                                                final_image_url = f"data:{mime_type};base64,{file_base64}"
+                                            
                                             update_data = {
                                                 "name": edit_name,
                                                 "primary_muscle": edit_primary if edit_primary else None,
                                                 "notes": edit_notes if edit_notes else None,
-                                                "image_url": edit_image_url if edit_image_url else None
+                                                "image_url": final_image_url if final_image_url else None
                                             }
                                             
                                             update_response = make_authenticated_request("PUT", f"/workouts/exercises/{exercise['id']}", json=update_data)
@@ -5272,6 +5302,12 @@ def exercises_page():
             secondary_muscles = st.text_input("Secondary Muscles (comma-separated)", placeholder="e.g., Core, Lower Back")
             notes = st.text_area("Notes / Form Cues", placeholder="Tips for proper form...")
             
+            # Image upload
+            st.markdown("**Exercise Image/GIF (optional):**")
+            uploaded_file = st.file_uploader("Upload an image or GIF", type=['png', 'jpg', 'jpeg', 'gif', 'webp'], key="new_exercise_image")
+            if uploaded_file:
+                st.image(uploaded_file, width=200, caption="Preview")
+            
             submitted = st.form_submit_button("Add Exercise", type="primary", use_container_width=True)
             
             if submitted:
@@ -5279,11 +5315,28 @@ def exercises_page():
                     st.error("Please enter an exercise name")
                 else:
                     try:
+                        # Handle image upload
+                        image_url = None
+                        if uploaded_file is not None:
+                            file_bytes = uploaded_file.read()
+                            file_base64 = base64.b64encode(file_bytes).decode('utf-8')
+                            file_extension = uploaded_file.name.split('.')[-1].lower()
+                            mime_types = {
+                                'png': 'image/png',
+                                'jpg': 'image/jpeg',
+                                'jpeg': 'image/jpeg',
+                                'gif': 'image/gif',
+                                'webp': 'image/webp'
+                            }
+                            mime_type = mime_types.get(file_extension, 'image/jpeg')
+                            image_url = f"data:{mime_type};base64,{file_base64}"
+                        
                         exercise_data = {
                             "name": name,
                             "primary_muscle": primary_muscle if primary_muscle else None,
                             "secondary_muscles": secondary_muscles if secondary_muscles else None,
-                            "notes": notes if notes else None
+                            "notes": notes if notes else None,
+                            "image_url": image_url
                         }
                         
                         response = make_authenticated_request("POST", "/workouts/exercises", json=exercise_data)
