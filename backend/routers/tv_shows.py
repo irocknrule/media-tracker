@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from typing import List, Optional
 from datetime import date
 from backend.database import get_db
@@ -25,12 +26,27 @@ def get_tv_shows(
     query = db.query(TVShowModel)
     
     if year:
-        # Filter by year if provided (looking at seasons' watched dates)
-        query = query.join(TVShowSeasonModel).filter(
-            TVShowSeasonModel.watched_date.isnot(None),
-            TVShowSeasonModel.watched_date >= date(year, 1, 1),
-            TVShowSeasonModel.watched_date <= date(year, 12, 31)
-        ).distinct()
+        # Check if it's the current year
+        current_year = date.today().year
+        
+        if year == current_year:
+            # For current year: include shows with seasons watched this year OR currently watching
+            query = query.join(TVShowSeasonModel).filter(
+                or_(
+                    # Shows with seasons watched this year
+                    (TVShowSeasonModel.watched_date >= date(year, 1, 1)) & 
+                    (TVShowSeasonModel.watched_date <= date(year, 12, 31)),
+                    # Shows currently being watched (regardless of watched date)
+                    TVShowModel.status == "currently_watching"
+                )
+            ).distinct()
+        else:
+            # For past years: only include shows with seasons watched in that year
+            query = query.join(TVShowSeasonModel).filter(
+                TVShowSeasonModel.watched_date.isnot(None),
+                TVShowSeasonModel.watched_date >= date(year, 1, 1),
+                TVShowSeasonModel.watched_date <= date(year, 12, 31)
+            ).distinct()
     
     tv_shows = query.offset(skip).limit(limit).all()
     return tv_shows

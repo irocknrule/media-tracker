@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, nullslast
+from sqlalchemy import desc, nullslast, or_
 from typing import List, Optional
 from datetime import date
 from backend.database import get_db
@@ -20,10 +20,26 @@ def get_books(
     """Get all books with optional filtering"""
     query = db.query(BookModel)
     if year:
-        query = query.filter(BookModel.finished_date.isnot(None)).filter(
-            BookModel.finished_date >= date(year, 1, 1),
-            BookModel.finished_date <= date(year, 12, 31)
-        )
+        # Check if it's the current year
+        current_year = date.today().year
+        
+        if year == current_year:
+            # For current year: include books finished this year OR currently reading
+            query = query.filter(
+                or_(
+                    # Books finished this year
+                    (BookModel.finished_date >= date(year, 1, 1)) & 
+                    (BookModel.finished_date <= date(year, 12, 31)),
+                    # Books currently being read (regardless of finished date)
+                    BookModel.status == "currently_reading"
+                )
+            )
+        else:
+            # For past years: only include books finished in that year
+            query = query.filter(BookModel.finished_date.isnot(None)).filter(
+                BookModel.finished_date >= date(year, 1, 1),
+                BookModel.finished_date <= date(year, 12, 31)
+            )
     # Order by finished_date desc (NULLs last), then by created_at desc as fallback
     books = query.order_by(
         nullslast(desc(BookModel.finished_date)),
