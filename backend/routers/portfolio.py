@@ -607,6 +607,17 @@ def delete_transaction(
     return None
 
 
+@router.delete("/transactions", status_code=status.HTTP_200_OK)
+def delete_all_transactions(
+    db: Session = Depends(get_db)
+):
+    """Delete all portfolio transactions"""
+    deleted_count = db.query(PortfolioTransactionModel).delete()
+    db.commit()
+    
+    return {"message": f"Successfully deleted {deleted_count} transaction(s)", "deleted_count": deleted_count}
+
+
 @router.get("/holdings", response_model=List[TickerHolding])
 def get_holdings(
     db: Session = Depends(get_db)

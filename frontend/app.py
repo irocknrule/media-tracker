@@ -3515,6 +3515,51 @@ def portfolio_overview_page():
             
             st.markdown("---")
             
+            # Delete All Section (Danger Zone)
+            with st.expander("🗑️ Delete All Transactions (Danger Zone)", expanded=False):
+                st.warning("⚠️ **Warning**: This will permanently delete ALL portfolio transactions and remove all holdings from your portfolio. This action cannot be undone.")
+                
+                # Get transaction count
+                try:
+                    txn_count_response = make_authenticated_request("GET", "/portfolio/transactions")
+                    if txn_count_response.status_code == 200:
+                        all_transactions = txn_count_response.json()
+                        txn_count = len(all_transactions)
+                        st.info(f"📊 There are currently **{txn_count}** transaction(s) that will be deleted.")
+                    else:
+                        st.info("⚠️ Unable to fetch transaction count.")
+                except Exception as e:
+                    st.info("⚠️ Unable to fetch transaction count.")
+                
+                st.markdown("---")
+                
+                # Confirmation checkbox
+                confirm_delete_all = st.checkbox(
+                    "I understand this will delete ALL portfolio data permanently",
+                    key="confirm_delete_all_transactions"
+                )
+                
+                if confirm_delete_all:
+                    if st.button(
+                        "🗑️ DELETE ALL TRANSACTIONS",
+                        key="delete_all_transactions",
+                        type="primary",
+                        use_container_width=True
+                    ):
+                        try:
+                            del_response = make_authenticated_request("DELETE", "/portfolio/transactions")
+                            if del_response.status_code == 200:
+                                result = del_response.json()
+                                st.success(f"✅ Successfully deleted {result.get('deleted_count', 0)} transaction(s)!")
+                                st.info("Refreshing page...")
+                                st.rerun()
+                            else:
+                                st.error(f"Failed to delete transactions: {del_response.text}")
+                        except Exception as e:
+                            st.error(f"Error deleting transactions: {str(e)}")
+            
+            st.markdown("---")
+            
             # Display holdings table
             st.markdown("### 📈 Current Holdings")
             
