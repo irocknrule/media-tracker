@@ -302,7 +302,8 @@ def update_query_params(category: str = None, page: str = None, **filters):
     
     # Add filter parameters
     for key, value in filters.items():
-        if value is not None and value != "All":
+        # Skip if None or if it's an "All (year)" format
+        if value is not None and value != "All" and not str(value).startswith("All ("):
             params[key] = str(value)
     
     # Debug: Show what we're trying to set
@@ -319,6 +320,13 @@ def update_query_params(category: str = None, page: str = None, **filters):
     # Try new API (Streamlit 1.30.0+)
     try:
         if hasattr(st, 'query_params'):
+            # First, clear year filter params if they're not in the new params
+            # This handles the case when switching back to "All"
+            year_filter_keys = ['tv_year', 'movie_year', 'book_year', 'music_year']
+            for filter_key in year_filter_keys:
+                if filter_key not in params and filter_key in st.query_params:
+                    del st.query_params[filter_key]
+            
             # Set each parameter individually for better reliability
             for key, value in params.items():
                 st.query_params[key] = value
@@ -584,21 +592,50 @@ def movies_page():
     with tab1:
         st.subheader("Your Movies")
         # Get persisted year filter from query params
-        year_options = ["All"] + list(range(2020, date.today().year + 2))
-        persisted_year = get_filter_from_query_params("movie_year", "All")
-        if persisted_year not in year_options:
-            persisted_year = "All"
-        default_index = year_options.index(persisted_year) if persisted_year in year_options else 0
+        # Reverse the range so newer years appear first
+        current_year = date.today().year
+        year_options = [f"All ({current_year})"] + list(reversed(range(2020, current_year + 2)))
+        persisted_year = get_filter_from_query_params("movie_year", f"All ({current_year})")
         
-        year_filter = st.selectbox("Filter by Year", year_options, index=default_index, key="movie_year")
+        # Normalize persisted_year to match year_options format
+        if persisted_year == "All" or str(persisted_year).startswith("All ("):
+            persisted_year = f"All ({current_year})"
+        elif isinstance(persisted_year, (int, str)):
+            try:
+                year_int = int(persisted_year)
+                if year_int in year_options:
+                    persisted_year = year_int
+                else:
+                    persisted_year = f"All ({current_year})"
+            except (ValueError, TypeError):
+                persisted_year = f"All ({current_year})"
+        else:
+            persisted_year = f"All ({current_year})"
         
-        # Update query params when filter changes
-        if year_filter != persisted_year:
+        # Use session state to track the selected year to avoid query param timing issues
+        if "movie_year_selected" not in st.session_state:
+            st.session_state["movie_year_selected"] = persisted_year
+        
+        default_index = year_options.index(st.session_state["movie_year_selected"]) if st.session_state["movie_year_selected"] in year_options else 0
+        
+        # Make dropdown smaller using column layout
+        col1, col2, col3 = st.columns([1, 2, 2])
+        with col1:
+            year_filter = st.selectbox("Filter by Year", year_options, index=default_index, key="movie_year_filter_widget")
+        
+        # Update session state and query params when selection changes
+        if year_filter != st.session_state["movie_year_selected"]:
+            st.session_state["movie_year_selected"] = year_filter
             update_query_params(movie_year=year_filter)
+            st.rerun()
+        
+        # Use the session state value for filtering
+        year_filter = st.session_state["movie_year_selected"]
         
         try:
             params = {}
-            if year_filter != "All":
+            # Check if year_filter is not "All (YYYY)" format
+            if not str(year_filter).startswith("All"):
                 params["year"] = year_filter
             
             response = make_authenticated_request("GET", "/movies/", params=params)
@@ -776,21 +813,52 @@ def tv_shows_page():
     with tab1:
         st.subheader("Your TV Shows")
         # Get persisted year filter from query params
-        year_options = ["All"] + list(range(2020, date.today().year + 2))
-        persisted_year = get_filter_from_query_params("tv_year", "All")
-        if persisted_year not in year_options:
-            persisted_year = "All"
-        default_index = year_options.index(persisted_year) if persisted_year in year_options else 0
+        # Reverse the range so newer years appear first
+        current_year = date.today().year
+        year_options = [f"All ({current_year})"] + list(reversed(range(2020, current_year + 2)))
+        persisted_year = get_filter_from_query_params("tv_year", f"All ({current_year})")
         
-        year_filter = st.selectbox("Filter by Year", year_options, index=default_index, key="tv_year")
+        # Normalize persisted_year to match year_options format
+        # Convert to same type as year_options items for proper comparison
+        if persisted_year == "All" or str(persisted_year).startswith("All ("):
+            persisted_year = f"All ({current_year})"
+        elif isinstance(persisted_year, (int, str)):
+            # Try to convert to int and check if it's in year_options
+            try:
+                year_int = int(persisted_year)
+                if year_int in year_options:
+                    persisted_year = year_int
+                else:
+                    persisted_year = f"All ({current_year})"
+            except (ValueError, TypeError):
+                persisted_year = f"All ({current_year})"
+        else:
+            persisted_year = f"All ({current_year})"
         
-        # Update query params when filter changes
-        if year_filter != persisted_year:
+        # Use session state to track the selected year to avoid query param timing issues
+        if "tv_year_selected" not in st.session_state:
+            st.session_state["tv_year_selected"] = persisted_year
+        
+        default_index = year_options.index(st.session_state["tv_year_selected"]) if st.session_state["tv_year_selected"] in year_options else 0
+        
+        # Make dropdown smaller using column layout
+        col1, col2, col3 = st.columns([1, 2, 2])
+        with col1:
+            year_filter = st.selectbox("Filter by Year", year_options, index=default_index, key="tv_year_filter_widget")
+        
+        # Update session state and query params when selection changes
+        if year_filter != st.session_state["tv_year_selected"]:
+            st.session_state["tv_year_selected"] = year_filter
             update_query_params(tv_year=year_filter)
+            st.rerun()
+        
+        # Use the session state value for filtering
+        year_filter = st.session_state["tv_year_selected"]
         
         try:
             params = {}
-            if year_filter != "All":
+            # Check if year_filter is not "All (YYYY)" format
+            if not str(year_filter).startswith("All"):
                 params["year"] = year_filter
             
             response = make_authenticated_request("GET", "/tv-shows/", params=params)
@@ -798,8 +866,81 @@ def tv_shows_page():
                 tv_shows = response.json()
                 
                 if tv_shows:
-                    # Display TV shows in grid layout with show posters
-                    st.markdown("### Your TV Shows")
+                    # Separate currently watching shows from all shows
+                    currently_watching = [show for show in tv_shows if show.get('status') == 'currently_watching']
+                    all_shows = tv_shows
+                    
+                    # Display Currently Watching section if there are any
+                    if currently_watching:
+                        st.markdown("### 📺 Currently Watching")
+                        cols_per_row = 4
+                        
+                        for i in range(0, len(currently_watching), cols_per_row):
+                            cols = st.columns(cols_per_row)
+                            for j, show in enumerate(currently_watching[i:i+cols_per_row]):
+                                with cols[j]:
+                                    # Display show poster
+                                    show_poster = show.get("show_thumbnail_url")
+                                    image_displayed = False
+                                    
+                                    if show_poster and show_poster.strip() and show_poster != "N/A":
+                                        if show_poster.startswith("http://") or show_poster.startswith("https://"):
+                                            try:
+                                                st.markdown(
+                                                    f'<img src="{show_poster}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
+                                                    unsafe_allow_html=True
+                                                )
+                                                image_displayed = True
+                                            except:
+                                                pass
+                                            
+                                            if not image_displayed:
+                                                try:
+                                                    st.image(show_poster, use_container_width=True)
+                                                    image_displayed = True
+                                                except:
+                                                    pass
+                                        elif show_poster.startswith("data:"):
+                                            try:
+                                                st.markdown(
+                                                    f'<img src="{show_poster}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
+                                                    unsafe_allow_html=True
+                                                )
+                                                image_displayed = True
+                                            except:
+                                                pass
+                                    
+                                    if not image_displayed:
+                                        st.markdown(
+                                            f'<div style="width:100%;height:250px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:48px;margin-bottom:10px;">📺</div>', 
+                                            unsafe_allow_html=True
+                                        )
+                                    
+                                    # Show title
+                                    st.write(f"**{show['title']}**")
+                                    
+                                    # Show year and genres
+                                    if show.get('year'):
+                                        st.caption(f"Year: {show['year']}")
+                                    if show.get('genres'):
+                                        st.caption(f"Genres: {show['genres']}")
+                                    
+                                    # Count seasons
+                                    season_count = len(show.get('seasons', []))
+                                    if season_count == 1:
+                                        st.caption(f"1 season")
+                                    elif season_count > 1:
+                                        st.caption(f"{season_count} seasons")
+                                    
+                                    # Show overall rating
+                                    overall_rating = show.get('overall_rating')
+                                    if overall_rating:
+                                        st.caption(f"Rating: {overall_rating}/10")
+                        
+                        st.markdown("---")
+                    
+                    # Display all TV shows in grid layout with show posters
+                    st.markdown("### All TV Shows")
                     cols_per_row = 4
                     
                     for i in range(0, len(tv_shows), cols_per_row):
@@ -1205,21 +1346,50 @@ def books_page():
     with tab1:
         st.subheader("Your Books")
         # Get persisted year filter from query params
-        year_options = ["All"] + list(range(2020, date.today().year + 2))
-        persisted_year = get_filter_from_query_params("book_year", "All")
-        if persisted_year not in year_options:
-            persisted_year = "All"
-        default_index = year_options.index(persisted_year) if persisted_year in year_options else 0
+        # Reverse the range so newer years appear first
+        current_year = date.today().year
+        year_options = [f"All ({current_year})"] + list(reversed(range(2020, current_year + 2)))
+        persisted_year = get_filter_from_query_params("book_year", f"All ({current_year})")
         
-        year_filter = st.selectbox("Filter by Year", year_options, index=default_index, key="book_year")
+        # Normalize persisted_year to match year_options format
+        if persisted_year == "All" or str(persisted_year).startswith("All ("):
+            persisted_year = f"All ({current_year})"
+        elif isinstance(persisted_year, (int, str)):
+            try:
+                year_int = int(persisted_year)
+                if year_int in year_options:
+                    persisted_year = year_int
+                else:
+                    persisted_year = f"All ({current_year})"
+            except (ValueError, TypeError):
+                persisted_year = f"All ({current_year})"
+        else:
+            persisted_year = f"All ({current_year})"
         
-        # Update query params when filter changes
-        if year_filter != persisted_year:
+        # Use session state to track the selected year to avoid query param timing issues
+        if "book_year_selected" not in st.session_state:
+            st.session_state["book_year_selected"] = persisted_year
+        
+        default_index = year_options.index(st.session_state["book_year_selected"]) if st.session_state["book_year_selected"] in year_options else 0
+        
+        # Make dropdown smaller using column layout
+        col1, col2, col3 = st.columns([1, 2, 2])
+        with col1:
+            year_filter = st.selectbox("Filter by Year", year_options, index=default_index, key="book_year_filter_widget")
+        
+        # Update session state and query params when selection changes
+        if year_filter != st.session_state["book_year_selected"]:
+            st.session_state["book_year_selected"] = year_filter
             update_query_params(book_year=year_filter)
+            st.rerun()
+        
+        # Use the session state value for filtering
+        year_filter = st.session_state["book_year_selected"]
         
         try:
             params = {}
-            if year_filter != "All":
+            # Check if year_filter is not "All (YYYY)" format
+            if not str(year_filter).startswith("All"):
                 params["year"] = year_filter
             
             response = make_authenticated_request("GET", "/books/", params=params)
@@ -1227,8 +1397,81 @@ def books_page():
                 books = response.json()
                 
                 if books:
-                    # Display books in grid layout
-                    st.markdown("### Your Books")
+                    # Separate currently reading books from all books
+                    currently_reading = [book for book in books if book.get('status') == 'currently_reading']
+                    all_books = books
+                    
+                    # Display Currently Reading section if there are any
+                    if currently_reading:
+                        st.markdown("### 📖 Currently Reading")
+                        cols_per_row = 4
+                        
+                        for i in range(0, len(currently_reading), cols_per_row):
+                            cols = st.columns(cols_per_row)
+                            for j, book in enumerate(currently_reading[i:i+cols_per_row]):
+                                with cols[j]:
+                                    thumbnail_url = book.get("thumbnail_url")
+                                    
+                                    # Display thumbnail
+                                    image_displayed = False
+                                    if thumbnail_url and thumbnail_url.strip() and thumbnail_url != "N/A":
+                                        if thumbnail_url.startswith("http://") or thumbnail_url.startswith("https://"):
+                                            try:
+                                                st.markdown(
+                                                    f'<img src="{thumbnail_url}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
+                                                    unsafe_allow_html=True
+                                                )
+                                                image_displayed = True
+                                            except:
+                                                pass
+                                            
+                                            if not image_displayed:
+                                                try:
+                                                    st.image(thumbnail_url, use_container_width=True)
+                                                    image_displayed = True
+                                                except:
+                                                    pass
+                                        elif thumbnail_url.startswith("data:"):
+                                            # Handle base64 data URLs
+                                            try:
+                                                st.markdown(
+                                                    f'<img src="{thumbnail_url}" style="width:100%;height:auto;border-radius:8px;display:block;margin-bottom:10px;max-height:350px;object-fit:contain;">', 
+                                                    unsafe_allow_html=True
+                                                )
+                                                image_displayed = True
+                                            except:
+                                                pass
+                                    
+                                    if not image_displayed:
+                                        st.markdown(
+                                            f'<div style="width:100%;height:250px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:48px;margin-bottom:10px;">📖</div>', 
+                                            unsafe_allow_html=True
+                                        )
+                                    
+                                    # Show title
+                                    st.write(f"**{book['title']}**")
+                                    
+                                    # Show author
+                                    if book.get('author'):
+                                        st.caption(f"by {book['author']}")
+                                    
+                                    # Show pages
+                                    if book.get('pages'):
+                                        st.caption(f"Pages: {book['pages']}")
+                                    
+                                    # Show finished date if available
+                                    if book.get('finished_date'):
+                                        st.caption(f"Finished: {book['finished_date']}")
+                                    
+                                    # Show rating
+                                    rating = book.get('rating')
+                                    if rating:
+                                        st.caption(f"Rating: {rating}/10")
+                        
+                        st.markdown("---")
+                    
+                    # Display all books in grid layout
+                    st.markdown("### All Books")
                     cols_per_row = 4
                     
                     for i in range(0, len(books), cols_per_row):
@@ -1395,21 +1638,50 @@ def music_page():
     with tab1:
         st.subheader("Your Music")
         # Get persisted year filter from query params
-        year_options = ["All"] + list(range(2020, date.today().year + 2))
-        persisted_year = get_filter_from_query_params("music_year", "All")
-        if persisted_year not in year_options:
-            persisted_year = "All"
-        default_index = year_options.index(persisted_year) if persisted_year in year_options else 0
+        # Reverse the range so newer years appear first
+        current_year = date.today().year
+        year_options = [f"All ({current_year})"] + list(reversed(range(2020, current_year + 2)))
+        persisted_year = get_filter_from_query_params("music_year", f"All ({current_year})")
         
-        year_filter = st.selectbox("Filter by Year", year_options, index=default_index, key="music_year")
+        # Normalize persisted_year to match year_options format
+        if persisted_year == "All" or str(persisted_year).startswith("All ("):
+            persisted_year = f"All ({current_year})"
+        elif isinstance(persisted_year, (int, str)):
+            try:
+                year_int = int(persisted_year)
+                if year_int in year_options:
+                    persisted_year = year_int
+                else:
+                    persisted_year = f"All ({current_year})"
+            except (ValueError, TypeError):
+                persisted_year = f"All ({current_year})"
+        else:
+            persisted_year = f"All ({current_year})"
         
-        # Update query params when filter changes
-        if year_filter != persisted_year:
+        # Use session state to track the selected year to avoid query param timing issues
+        if "music_year_selected" not in st.session_state:
+            st.session_state["music_year_selected"] = persisted_year
+        
+        default_index = year_options.index(st.session_state["music_year_selected"]) if st.session_state["music_year_selected"] in year_options else 0
+        
+        # Make dropdown smaller using column layout
+        col1, col2, col3 = st.columns([1, 2, 2])
+        with col1:
+            year_filter = st.selectbox("Filter by Year", year_options, index=default_index, key="music_year_filter_widget")
+        
+        # Update session state and query params when selection changes
+        if year_filter != st.session_state["music_year_selected"]:
+            st.session_state["music_year_selected"] = year_filter
             update_query_params(music_year=year_filter)
+            st.rerun()
+        
+        # Use the session state value for filtering
+        year_filter = st.session_state["music_year_selected"]
         
         try:
             params = {}
-            if year_filter != "All":
+            # Check if year_filter is not "All (YYYY)" format
+            if not str(year_filter).startswith("All"):
                 params["year"] = year_filter
             
             response = make_authenticated_request("GET", "/music/", params=params)
