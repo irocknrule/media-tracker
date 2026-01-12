@@ -21,6 +21,15 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Hide the default Streamlit page navigation
+st.markdown("""
+    <style>
+        [data-testid="stSidebarNav"] {
+            display: none;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 
 def make_authenticated_request(method: str, endpoint: str, **kwargs):
     """Make an API request"""
@@ -488,7 +497,7 @@ def main_app():
                     category=st.session_state["selected_category"],
                     page=page
                 )
-        else:  # Portfolio Tracker
+        elif st.session_state["selected_category"] == "Portfolio Tracker":
             st.markdown("### 💼 Portfolio Tracker")
             st.markdown("---")
             current_page = st.session_state.get("selected_page", "Overview")
@@ -509,10 +518,7 @@ def main_app():
                     category=st.session_state["selected_category"],
                     page=page
                 )
-    
-    # Workout Tracker sidebar
-    if st.session_state["selected_category"] == "Workout Tracker":
-        with st.sidebar:
+        elif st.session_state["selected_category"] == "Workout Tracker":
             st.markdown("### 💪 Workout Tracker")
             st.markdown("---")
             current_page = st.session_state.get("selected_page", "Log Workout")
@@ -3776,10 +3782,17 @@ def portfolio_transactions_page():
                         )
                         
                         if response.status_code == 201:
+                            # Check if this was a duplicate (by comparing with existing)
+                            # Note: The API returns the existing transaction if duplicate,
+                            # so we can't easily detect it here. But we can show a generic success.
                             st.success(f"Transaction added successfully!")
                             st.rerun()
                         else:
-                            st.error(f"Failed to add transaction: {response.text}")
+                            error_msg = response.text
+                            if "duplicate" in error_msg.lower():
+                                st.warning(f"⚠️ This transaction already exists in the database.")
+                            else:
+                                st.error(f"Failed to add transaction: {error_msg}")
                     
                     except Exception as e:
                         st.error(f"Error adding transaction: {str(e)}")
@@ -3883,13 +3896,44 @@ def portfolio_upload_page():
                         )
                         
                         if response.status_code == 201:
-                            created = response.json()
-                            st.success(f"✅ Successfully uploaded {len(created)} transactions!")
+                            result = response.json()
+                            
+                            # Handle both old format (list) and new format (object with created/duplicates)
+                            if isinstance(result, list):
+                                # Old format - backward compatibility
+                                created = result
+                                duplicates = []
+                            else:
+                                # New format with duplicate tracking
+                                created = result.get('created', [])
+                                duplicates = result.get('duplicates', [])
+                                total_processed = result.get('total_processed', len(created) + len(duplicates))
+                                total_created = result.get('total_created', len(created))
+                                total_duplicates = result.get('total_duplicates', len(duplicates))
+                            
+                            # Display results
+                            if duplicates:
+                                st.warning(f"⚠️ Uploaded {len(created)} new transaction(s), {len(duplicates)} duplicate(s) skipped")
+                            else:
+                                st.success(f"✅ Successfully uploaded {len(created)} transaction(s)!")
                             
                             # Show summary
-                            with st.expander("View Uploaded Transactions"):
-                                for txn in created:
-                                    st.write(f"- {txn['ticker']} ({txn['asset_type']}): {txn['transaction_type']} {txn['quantity']} @ ${txn['price_per_unit']} on {txn['transaction_date']}")
+                            if created or duplicates:
+                                with st.expander("📊 Upload Summary"):
+                                    if isinstance(result, dict):
+                                        st.write(f"**Total Processed:** {total_processed}")
+                                        st.write(f"**New Transactions:** {total_created}")
+                                        st.write(f"**Duplicates Skipped:** {total_duplicates}")
+                                    
+                                    if created:
+                                        st.subheader("✅ New Transactions")
+                                        for txn in created:
+                                            st.write(f"- {txn['ticker']} ({txn['asset_type']}): {txn['transaction_type']} {txn['quantity']} @ ${txn['price_per_unit']} on {txn['transaction_date']}")
+                                    
+                                    if duplicates:
+                                        st.subheader("⚠️ Duplicate Transactions (Skipped)")
+                                        for txn in duplicates:
+                                            st.write(f"- {txn['ticker']} ({txn['asset_type']}): {txn['transaction_type']} {txn['quantity']} @ ${txn['price_per_unit']} on {txn['transaction_date']}")
                         else:
                             st.error(f"Failed to upload transactions: {response.text}")
                     
@@ -3925,13 +3969,44 @@ def portfolio_upload_page():
                     )
                     
                     if response.status_code == 201:
-                        created = response.json()
-                        st.success(f"✅ Successfully uploaded {len(created)} transactions!")
+                        result = response.json()
+                        
+                        # Handle both old format (list) and new format (object with created/duplicates)
+                        if isinstance(result, list):
+                            # Old format - backward compatibility
+                            created = result
+                            duplicates = []
+                        else:
+                            # New format with duplicate tracking
+                            created = result.get('created', [])
+                            duplicates = result.get('duplicates', [])
+                            total_processed = result.get('total_processed', len(created) + len(duplicates))
+                            total_created = result.get('total_created', len(created))
+                            total_duplicates = result.get('total_duplicates', len(duplicates))
+                        
+                        # Display results
+                        if duplicates:
+                            st.warning(f"⚠️ Uploaded {len(created)} new transaction(s), {len(duplicates)} duplicate(s) skipped")
+                        else:
+                            st.success(f"✅ Successfully uploaded {len(created)} transaction(s)!")
                         
                         # Show summary
-                        with st.expander("View Uploaded Transactions"):
-                            for txn in created:
-                                st.write(f"- {txn['ticker']} ({txn['asset_type']}): {txn['transaction_type']} {txn['quantity']} @ ${txn['price_per_unit']} on {txn['transaction_date']}")
+                        if created or duplicates:
+                            with st.expander("📊 Upload Summary"):
+                                if isinstance(result, dict):
+                                    st.write(f"**Total Processed:** {total_processed}")
+                                    st.write(f"**New Transactions:** {total_created}")
+                                    st.write(f"**Duplicates Skipped:** {total_duplicates}")
+                                
+                                if created:
+                                    st.subheader("✅ New Transactions")
+                                    for txn in created:
+                                        st.write(f"- {txn['ticker']} ({txn['asset_type']}): {txn['transaction_type']} {txn['quantity']} @ ${txn['price_per_unit']} on {txn['transaction_date']}")
+                                
+                                if duplicates:
+                                    st.subheader("⚠️ Duplicate Transactions (Skipped)")
+                                    for txn in duplicates:
+                                        st.write(f"- {txn['ticker']} ({txn['asset_type']}): {txn['transaction_type']} {txn['quantity']} @ ${txn['price_per_unit']} on {txn['transaction_date']}")
                     else:
                         st.error(f"Failed to upload transactions: {response.text}")
                 
@@ -4022,7 +4097,7 @@ def portfolio_individual_holdings_page():
                     
                     st.markdown("---")
                     
-                    # Delete Ticker Section (Danger Zone)
+                    # Delete Ticker Section (Danger Zone) - Hidden in expander
                     with st.expander("🗑️ Delete Ticker (Remove All Transactions)", expanded=False):
                         st.warning(f"⚠️ **Warning**: This will permanently delete ALL transactions for **{ticker}** and remove it from your portfolio.")
                         
@@ -5206,38 +5281,73 @@ def log_workout_page():
                 workout_options = ["Custom Workout"] + [t["name"] for t in templates]
                 selected_workout = st.selectbox("Select Workout", workout_options)
                 
-                workout_id = None
-                exercises_list = []
-                
-                if selected_workout != "Custom Workout":
-                    # Get workout details
-                    workout = next(t for t in templates if t["name"] == selected_workout)
-                    workout_id = workout["id"]
-                    
-                    # Get full workout details with exercises
-                    workout_details_response = make_authenticated_request("GET", f"/workouts/templates/{workout_id}")
-                    if workout_details_response.status_code == 200:
-                        workout_details = workout_details_response.json()
-                        exercises_list = workout_details.get("exercises", [])
-                        
-                        st.info(f"**{selected_workout}** includes {len(exercises_list)} exercises")
-                        
-                        # Show last workout performance if available
-                        try:
-                            last_workout_response = make_authenticated_request("GET", f"/workouts/records/{workout_id}/last")
-                            if last_workout_response.status_code == 200:
-                                last_workout = last_workout_response.json()
-                                with st.expander("📊 View Last Workout Performance"):
-                                    st.caption(f"Last performed: {datetime.fromisoformat(last_workout['workout_date']).strftime('%B %d, %Y at %I:%M %p')}")
-                                    for ex_record in last_workout.get("exercises", []):
-                                        st.write(f"**{ex_record['exercise_name']}**: {ex_record.get('sets', '-')} sets × {ex_record.get('reps', '-')} reps @ {ex_record.get('weight', '-')} lbs")
-                        except:
-                            pass
-            
             with col2:
                 workout_date = st.date_input("Workout Date", value=date.today())
                 workout_time = st.time_input("Workout Time", value=datetime.now().time())
                 duration = st.number_input("Duration (minutes)", min_value=0, value=60)
+            
+            workout_id = None
+            exercises_list = []
+            
+            if selected_workout != "Custom Workout":
+                # Get workout details
+                workout = next(t for t in templates if t["name"] == selected_workout)
+                workout_id = workout["id"]
+                
+                # Get full workout details with exercises
+                workout_details_response = make_authenticated_request("GET", f"/workouts/templates/{workout_id}")
+                if workout_details_response.status_code == 200:
+                    workout_details = workout_details_response.json()
+                    exercises_list = workout_details.get("exercises", [])
+                    
+                    st.info(f"**{selected_workout}** includes {len(exercises_list)} exercises")
+                    
+                    # Show last workout performance if available
+                    try:
+                        last_workout_response = make_authenticated_request("GET", f"/workouts/records/{workout_id}/last")
+                        if last_workout_response.status_code == 200:
+                            last_workout = last_workout_response.json()
+                            st.markdown("---")
+                            st.subheader("📊 Last Workout History")
+                            last_workout_date = datetime.fromisoformat(last_workout['workout_date']).strftime('%B %d, %Y at %I:%M %p')
+                            st.caption(f"Last performed: {last_workout_date}")
+                            
+                            # Display exercise history in a nice format
+                            if last_workout.get("exercises"):
+                                # Create a styled container
+                                with st.container():
+                                    for idx, ex_record in enumerate(last_workout.get("exercises", [])):
+                                        exercise_name = ex_record['exercise_name']
+                                        sets = ex_record.get('sets') if ex_record.get('sets') is not None else '-'
+                                        reps = ex_record.get('reps') if ex_record.get('reps') is not None else '-'
+                                        weight = ex_record.get('weight')
+                                        weight_unit = ex_record.get('weight_unit', 'lbs')
+                                        
+                                        # Format the display
+                                        if weight is not None:
+                                            weight_display = f"{weight} {weight_unit}"
+                                        else:
+                                            weight_display = "-"
+                                        
+                                        # Use columns for better alignment
+                                        ex_col1, ex_col2, ex_col3, ex_col4 = st.columns([3, 1, 1, 2])
+                                        with ex_col1:
+                                            st.write(f"**{exercise_name}**")
+                                        with ex_col2:
+                                            st.write(f"**Sets:** {sets}")
+                                        with ex_col3:
+                                            st.write(f"**Reps:** {reps}")
+                                        with ex_col4:
+                                            st.write(f"**Weight:** {weight_display}")
+                                        
+                                        # Add separator between exercises (but not after the last one)
+                                        if idx < len(last_workout.get("exercises", [])) - 1:
+                                            st.markdown("---")
+                            else:
+                                st.info("No exercise history found for this workout.")
+                    except Exception as e:
+                        # Silently pass if no previous workout exists
+                        pass
             
             st.markdown("---")
             

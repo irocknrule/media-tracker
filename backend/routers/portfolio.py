@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime
 from backend.database import get_db
@@ -16,6 +17,38 @@ from backend.schemas import (
 import requests
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
+
+
+def check_duplicate_transaction(
+    transaction_data: Dict[str, Any],
+    db: Session
+) -> Optional[PortfolioTransactionModel]:
+    """
+    Check if an identical transaction already exists in the database.
+    Returns the existing transaction if found, None otherwise.
+    
+    A transaction is considered duplicate if it matches on:
+    - ticker
+    - transaction_type
+    - transaction_date
+    - quantity
+    - price_per_unit
+    - total_amount
+    - fees
+    - asset_type
+    """
+    existing = db.query(PortfolioTransactionModel).filter(
+        PortfolioTransactionModel.ticker == transaction_data['ticker'],
+        PortfolioTransactionModel.transaction_type == transaction_data['transaction_type'],
+        PortfolioTransactionModel.transaction_date == transaction_data['transaction_date'],
+        PortfolioTransactionModel.quantity == transaction_data['quantity'],
+        PortfolioTransactionModel.price_per_unit == transaction_data['price_per_unit'],
+        PortfolioTransactionModel.total_amount == transaction_data['total_amount'],
+        PortfolioTransactionModel.fees == (transaction_data.get('fees') or 0.0),
+        PortfolioTransactionModel.asset_type == transaction_data['asset_type']
+    ).first()
+    
+    return existing
 
 
 def get_current_stock_price(ticker: str) -> Optional[float]:
@@ -410,6 +443,7 @@ def create_transaction(
     transaction_data['ticker'] = transaction_data['ticker'].upper()
     transaction_data['transaction_type'] = transaction_data['transaction_type'].upper()
     transaction_data['asset_type'] = transaction_data['asset_type'].upper()
+    transaction_data['fees'] = transaction_data.get('fees', 0.0) or 0.0  # Normalize fees
     
     # Validate transaction type
     if transaction_data['transaction_type'] not in ["BUY", "SELL"]:
@@ -425,12 +459,30 @@ def create_transaction(
             detail="Asset type must be 'STOCK', 'ETF', or 'MUTUAL_FUND'"
         )
     
-    db_transaction = PortfolioTransactionModel(**transaction_data)
-    db.add(db_transaction)
-    db.commit()
-    db.refresh(db_transaction)
+    # Check for duplicate transaction
+    existing_transaction = check_duplicate_transaction(transaction_data, db)
+    if existing_transaction:
+        # Return existing transaction instead of creating a duplicate
+        return existing_transaction
     
-    return db_transaction
+    try:
+        db_transaction = PortfolioTransactionModel(**transaction_data)
+        db.add(db_transaction)
+        db.commit()
+        db.refresh(db_transaction)
+        return db_transaction
+    except IntegrityError as e:
+        db.rollback()
+        # Check if it's a unique constraint violation
+        if "uq_portfolio_transaction" in str(e) or "UNIQUE constraint" in str(e):
+            # Try to fetch the existing transaction
+            existing_transaction = check_duplicate_transaction(transaction_data, db)
+            if existing_transaction:
+                return existing_transaction
+        raise HTTPException(
+            status_code=400,
+            detail="A duplicate transaction already exists in the database"
+        )
 
 
 @router.post("/transactions/batch", response_model=List[PortfolioTransaction], status_code=status.HTTP_201_CREATED)
@@ -447,6 +499,7 @@ def create_transactions_batch(
         transaction_data['ticker'] = transaction_data['ticker'].upper()
         transaction_data['transaction_type'] = transaction_data['transaction_type'].upper()
         transaction_data['asset_type'] = transaction_data['asset_type'].upper()
+        transaction_data['fees'] = transaction_data.get('fees', 0.0) or 0.0  # Normalize fees
         
         # Validate transaction type
         if transaction_data['transaction_type'] not in ["BUY", "SELL"]:
@@ -462,11 +515,44 @@ def create_transactions_batch(
                 detail=f"Invalid asset type for {transaction_data['ticker']}: must be 'STOCK', 'ETF', or 'MUTUAL_FUND'"
             )
         
-        db_transaction = PortfolioTransactionModel(**transaction_data)
-        db.add(db_transaction)
-        created_transactions.append(db_transaction)
+        # Check for duplicate transaction
+        existing_transaction = check_duplicate_transaction(transaction_data, db)
+        if existing_transaction:
+            # Skip duplicate, use existing transaction
+            created_transactions.append(existing_transaction)
+        else:
+            db_transaction = PortfolioTransactionModel(**transaction_data)
+            db.add(db_transaction)
+            created_transactions.append(db_transaction)
     
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        # Check if it's a unique constraint violation
+        if "uq_portfolio_transaction" in str(e) or "UNIQUE constraint" in str(e):
+            # Re-check for duplicates and only add non-duplicates
+            created_transactions = []
+            for transaction in batch.transactions:
+                transaction_data = transaction.dict()
+                transaction_data['ticker'] = transaction_data['ticker'].upper()
+                transaction_data['transaction_type'] = transaction_data['transaction_type'].upper()
+                transaction_data['asset_type'] = transaction_data['asset_type'].upper()
+                transaction_data['fees'] = transaction_data.get('fees', 0.0) or 0.0
+                
+                existing_transaction = check_duplicate_transaction(transaction_data, db)
+                if existing_transaction:
+                    created_transactions.append(existing_transaction)
+                else:
+                    db_transaction = PortfolioTransactionModel(**transaction_data)
+                    db.add(db_transaction)
+                    created_transactions.append(db_transaction)
+            db.commit()
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error creating transactions: {str(e)}"
+            )
     
     # Refresh all created transactions
     for txn in created_transactions:
@@ -503,6 +589,7 @@ def upload_transactions_flexible(
             transaction_data['ticker'] = transaction_data['ticker'].upper()
             transaction_data['transaction_type'] = transaction_data['transaction_type'].upper()
             transaction_data['asset_type'] = transaction_data['asset_type'].upper()
+            transaction_data['fees'] = transaction_data.get('fees', 0.0) or 0.0  # Normalize fees
             
             # Convert transaction_date string to date object if it's a string
             if isinstance(transaction_data.get('transaction_date'), str):
@@ -526,11 +613,50 @@ def upload_transactions_flexible(
                     detail=f"Invalid asset type for {transaction_data['ticker']}: must be 'STOCK', 'ETF', or 'MUTUAL_FUND'"
                 )
             
-            db_transaction = PortfolioTransactionModel(**transaction_data)
-            db.add(db_transaction)
-            created_transactions.append(db_transaction)
+            # Check for duplicate transaction
+            existing_transaction = check_duplicate_transaction(transaction_data, db)
+            if existing_transaction:
+                # Skip duplicate, use existing transaction
+                created_transactions.append(existing_transaction)
+            else:
+                db_transaction = PortfolioTransactionModel(**transaction_data)
+                db.add(db_transaction)
+                created_transactions.append(db_transaction)
         
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError as e:
+            db.rollback()
+            # Check if it's a unique constraint violation
+            if "uq_portfolio_transaction" in str(e) or "UNIQUE constraint" in str(e):
+                # Re-check for duplicates and only add non-duplicates
+                created_transactions = []
+                for transaction_data in parsed_transactions:
+                    transaction_data['ticker'] = transaction_data['ticker'].upper()
+                    transaction_data['transaction_type'] = transaction_data['transaction_type'].upper()
+                    transaction_data['asset_type'] = transaction_data['asset_type'].upper()
+                    transaction_data['fees'] = transaction_data.get('fees', 0.0) or 0.0
+                    
+                    if isinstance(transaction_data.get('transaction_date'), str):
+                        from datetime import datetime as dt
+                        transaction_data['transaction_date'] = dt.strptime(
+                            transaction_data['transaction_date'], 
+                            "%Y-%m-%d"
+                        ).date()
+                    
+                    existing_transaction = check_duplicate_transaction(transaction_data, db)
+                    if existing_transaction:
+                        created_transactions.append(existing_transaction)
+                    else:
+                        db_transaction = PortfolioTransactionModel(**transaction_data)
+                        db.add(db_transaction)
+                        created_transactions.append(db_transaction)
+                db.commit()
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Error processing transactions: {str(e)}"
+                )
         
         # Refresh all created transactions
         for txn in created_transactions:

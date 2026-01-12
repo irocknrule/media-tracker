@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, Float, ForeignKey, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, Date, Float, ForeignKey, DateTime, Boolean, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -105,6 +105,13 @@ class HabitLog(Base):
 
 class PortfolioTransaction(Base):
     __tablename__ = "portfolio_transactions"
+    __table_args__ = (
+        UniqueConstraint(
+            'ticker', 'transaction_type', 'transaction_date', 'quantity', 
+            'price_per_unit', 'total_amount', 'fees', 'asset_type',
+            name='uq_portfolio_transaction'
+        ),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
     ticker = Column(String, nullable=False, index=True)  # Stock ticker symbol (e.g., "AAPL", "VTI")

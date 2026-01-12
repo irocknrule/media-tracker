@@ -32,6 +32,7 @@ def init_db():
     migrate_add_thumbnail_url()
     migrate_add_habits()
     migrate_add_portfolio()
+    migrate_add_portfolio_unique_constraint()
     
     db = SessionLocal()
     try:
@@ -186,9 +187,20 @@ def migrate_add_portfolio():
     run_migration()
 
 
+def migrate_add_portfolio_unique_constraint():
+    """Migration: Add unique constraint to portfolio_transactions table"""
+    # Import here to avoid circular imports
+    import sys
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
+    from migrate_add_portfolio_unique_constraint import migrate_add_portfolio_unique_constraint as run_migration
+    run_migration()
+
+
 if __name__ == "__main__":
     init_db()
     migrate_add_thumbnail_url()
     migrate_add_habits()
     migrate_add_portfolio()
+    migrate_add_portfolio_unique_constraint()
 
