@@ -218,7 +218,7 @@ def initialize_state_from_query_params():
         # Handle list values from old API
         if isinstance(category, list) and len(category) > 0:
             category = category[0]
-        valid_categories = ["Media Tracker", "Habit Tracker", "Portfolio Tracker"]
+        valid_categories = ["Media Tracker", "Habit Tracker", "Portfolio Tracker", "Workout Tracker"]
         if category in valid_categories:
             st.session_state["selected_category"] = category
         else:
@@ -253,13 +253,24 @@ def initialize_state_from_query_params():
             else:
                 if "selected_page" not in st.session_state:
                     st.session_state["selected_page"] = "Log Habits"
-        else:  # Portfolio Tracker
-            valid_pages = ["Overview", "Transactions", "Upload Data", "Individual Holdings"]
+        elif category == "Portfolio Tracker":
+            valid_pages = ["Overview", "Transactions", "Upload Data", "Individual Holdings", "Asset Allocation"]
             if page in valid_pages:
                 st.session_state["selected_page"] = page
             else:
                 if "selected_page" not in st.session_state:
                     st.session_state["selected_page"] = "Overview"
+        elif category == "Workout Tracker":
+            valid_pages = ["Log Workout", "Workout History", "Exercises", "Workouts", "Progress", "Analytics"]
+            if page in valid_pages:
+                st.session_state["selected_page"] = page
+            else:
+                if "selected_page" not in st.session_state:
+                    st.session_state["selected_page"] = "Log Workout"
+        else:
+            # Unknown category, use default
+            if "selected_page" not in st.session_state:
+                st.session_state["selected_page"] = "Movies"
     elif "selected_page" not in st.session_state:
         # No query param and no session state - set default based on category
         category = st.session_state["selected_category"]
@@ -267,8 +278,12 @@ def initialize_state_from_query_params():
             st.session_state["selected_page"] = "Movies"
         elif category == "Habit Tracker":
             st.session_state["selected_page"] = "Log Habits"
-        else:
+        elif category == "Portfolio Tracker":
             st.session_state["selected_page"] = "Overview"
+        elif category == "Workout Tracker":
+            st.session_state["selected_page"] = "Log Workout"
+        else:
+            st.session_state["selected_page"] = "Movies"
 
 
 def update_query_params(category: str = None, page: str = None, **filters):
@@ -370,6 +385,21 @@ def main_app():
     """Main application"""
     # Initialize state from query parameters (persists across refreshes)
     initialize_state_from_query_params()
+    
+    # Clean up exercise_id param if we're not on the Exercises page
+    # This keeps URLs clean when navigating away from exercises
+    try:
+        query_params = get_query_params()
+        current_page = st.session_state.get("selected_page", "")
+        if "exercise_id" in query_params and current_page != "Exercises":
+            # Remove exercise_id from query params if not on Exercises page
+            try:
+                if hasattr(st, 'query_params') and 'exercise_id' in st.query_params:
+                    del st.query_params['exercise_id']
+            except:
+                pass
+    except:
+        pass
     
     # Ensure query params are set to match current state (for first load scenario)
     # This ensures that even on first load, the URL has query params that persist on refresh
@@ -5262,6 +5292,25 @@ def portfolio_allocation_page():
 # WORKOUT TRACKER PAGES
 # ============================================================================
 
+def is_cardio_exercise(exercise_name: str) -> bool:
+    """Determine if an exercise is cardio based on name keywords"""
+    exercise_lower = exercise_name.lower()
+    
+    # Cardio keywords - exclude "row" to avoid matching strength exercises like "bent-over-row"
+    # Only use "rowing" for the cardio activity, not "row" (which appears in strength exercises)
+    cardio_keywords = [
+        "bike", "biking", "cycling", 
+        "run", "running", "jog", "jogging", 
+        "cardio", 
+        "treadmill", "elliptical", 
+        "rowing",  # Only "rowing" not "row" to avoid matching "bent-over-row", etc.
+        "swim", "swimming", 
+        "walk", "walking"
+    ]
+    
+    return any(keyword in exercise_lower for keyword in cardio_keywords)
+
+
 def log_workout_page():
     """Log a workout session"""
     st.title("💪 Log Workout")
@@ -5285,6 +5334,10 @@ def log_workout_page():
                 workout_date = st.date_input("Workout Date", value=date.today())
                 workout_time = st.time_input("Workout Time", value=datetime.now().time())
                 duration = st.number_input("Duration (minutes)", min_value=0, value=60)
+            
+            # Track previous workout_date to detect changes
+            if "previous_workout_date" not in st.session_state:
+                st.session_state.previous_workout_date = None
             
             workout_id = None
             exercises_list = []
@@ -5367,44 +5420,238 @@ def log_workout_page():
                 if "current_workout" not in st.session_state:
                     st.session_state.current_workout = None
                 
+                # Check if workout_date has changed - if so, try to load existing workout records
+                workout_date_changed = st.session_state.previous_workout_date != workout_date
+                if workout_date_changed:
+                    st.session_state.previous_workout_date = workout_date
+                    
+                    # Clear exercises first (will be repopulated if existing records found)
+                    st.session_state.workout_exercises = []
+                    
+                    # Try to load existing workout records for this date
+                    try:
+                        params = {
+                            "start_date": workout_date.isoformat(),
+                            "end_date": workout_date.isoformat()
+                        }
+                        existing_records_response = make_authenticated_request("GET", "/workouts/records", params=params)
+                        
+                        if existing_records_response.status_code == 200:
+                            existing_records = existing_records_response.json()
+                            
+                            # Aggregate all exercises from all workout records for this date
+                            # Deduplicate by exercise_id (keep first occurrence = most recent)
+                            if existing_records:
+                                exercises_dict = {}  # Key: exercise_id, Value: exercise data
+                                
+                                # Process records in order (most recent first due to API ordering)
+                                for record in existing_records:
+                                    if record.get("exercises"):
+                                        for ex in record["exercises"]:
+                                            exercise_id = ex["exercise_id"]
+                                            # Only add if we haven't seen this exercise_id yet
+                                            if exercise_id not in exercises_dict:
+                                                exercise_name = ex["exercise_name"]
+                                                exercises_dict[exercise_id] = {
+                                                    "exercise_id": exercise_id,
+                                                    "exercise_name": exercise_name,
+                                                    "sets": ex.get("sets", 3),
+                                                    "reps": ex.get("reps", 10),
+                                                    "weight": ex.get("weight", 0.0),
+                                                    "time_seconds": ex.get("time_seconds"),
+                                                    "distance": ex.get("distance"),
+                                                    "distance_unit": ex.get("distance_unit", "mi")
+                                                }
+                                
+                                # Convert dictionary values to list
+                                st.session_state.workout_exercises = list(exercises_dict.values())
+                                
+                                if st.session_state.workout_exercises:
+                                    st.success(f"✅ Loaded {len(st.session_state.workout_exercises)} exercise(s) from existing workout records for {workout_date.strftime('%B %d, %Y')}")
+                    except Exception as e:
+                        # Silently fail if there are no existing records or API error
+                        pass
+                
                 # Check if workout selection has changed
                 if st.session_state.current_workout != selected_workout:
                     st.session_state.current_workout = selected_workout
-                    st.session_state.workout_exercises = []
+                    # Only clear exercises if date hasn't changed (to preserve loaded exercises)
+                    if not workout_date_changed:
+                        st.session_state.workout_exercises = []
                     
-                    # Pre-populate with workout template exercises if any
-                    if exercises_list:
+                    # Pre-populate with workout template exercises if any (only if exercises list is empty)
+                    if exercises_list and not st.session_state.workout_exercises:
                         for ex in exercises_list:
-                            st.session_state.workout_exercises.append({
+                            exercise_name = ex["exercise_name"]
+                            is_cardio = is_cardio_exercise(exercise_name)
+                            exercise_data = {
                                 "exercise_id": ex["exercise_id"],
-                                "exercise_name": ex["exercise_name"],
-                                "sets": 3,
-                                "reps": 10,
-                                "weight": 0.0
-                            })
+                                "exercise_name": exercise_name,
+                                "sets": 3 if not is_cardio else None,
+                                "reps": 10 if not is_cardio else None,
+                                "weight": 0.0 if not is_cardio else None,
+                                "time_seconds": None if not is_cardio else None,
+                                "distance": None if not is_cardio else None,
+                                "distance_unit": "mi" if is_cardio else None
+                            }
+                            st.session_state.workout_exercises.append(exercise_data)
                 
                 # Display current exercises
                 for idx, ex_record in enumerate(st.session_state.workout_exercises):
                     with st.container():
-                        col1, col2, col3, col4, col5, col6 = st.columns([3, 1, 1, 1, 1, 1])
+                        exercise_name = ex_record['exercise_name']
+                        is_cardio = is_cardio_exercise(exercise_name)
+                        
+                        # Use different column layout for cardio vs strength exercises
+                        if is_cardio:
+                            col1, col2, col3, col4, col5, col6 = st.columns([3, 1.5, 1.5, 1, 1, 1])
+                        else:
+                            col1, col2, col3, col4, col5, col6, col7 = st.columns([3, 1, 1, 1, 1, 1, 1])
                         
                         with col1:
-                            st.write(f"**{ex_record['exercise_name']}**")
-                        with col2:
-                            sets = st.number_input("Sets", min_value=1, value=ex_record.get("sets", 3), key=f"sets_{idx}")
-                            st.session_state.workout_exercises[idx]["sets"] = sets
-                        with col3:
-                            reps = st.number_input("Reps", min_value=1, value=ex_record.get("reps", 10), key=f"reps_{idx}")
-                            st.session_state.workout_exercises[idx]["reps"] = reps
-                        with col4:
-                            weight = st.number_input("Weight (lbs)", min_value=0.0, value=float(ex_record.get("weight", 0)), step=2.5, key=f"weight_{idx}")
-                            st.session_state.workout_exercises[idx]["weight"] = weight
-                        with col5:
-                            st.write("")  # Spacing
-                            st.write("")  # Spacing
-                            if st.button("❌", key=f"remove_{idx}"):
-                                st.session_state.workout_exercises.pop(idx)
-                                st.rerun()
+                            # Make exercise name a clickable link to the exercise page (opens in new tab)
+                            exercise_id = ex_record.get('exercise_id')
+                            if exercise_id:
+                                # Create a link that opens in a new tab using HTML
+                                import urllib.parse
+                                params = {
+                                    "category": "Workout Tracker",
+                                    "page": "Exercises",
+                                    "exercise_id": str(exercise_id)
+                                }
+                                query_string = urllib.parse.urlencode(params)
+                                
+                                # Use markdown with HTML to create a link that opens in new tab
+                                link_html = f"""
+                                <a href="?{query_string}" target="_blank" style="
+                                    color: #1f77b4;
+                                    text-decoration: underline;
+                                    font-weight: bold;
+                                    cursor: pointer;
+                                ">{exercise_name}</a>
+                                """
+                                st.markdown(link_html, unsafe_allow_html=True)
+                            else:
+                                st.write(f"**{exercise_name}**")
+                        
+                        if is_cardio:
+                            # Cardio fields: Time (minutes), Distance (miles)
+                            with col2:
+                                # Time in minutes (convert from seconds if exists)
+                                time_seconds = ex_record.get("time_seconds")
+                                if time_seconds is not None:
+                                    time_minutes = time_seconds / 60.0
+                                else:
+                                    time_minutes = 0.0
+                                time_minutes = st.number_input("Time (min)", min_value=0.0, value=time_minutes, step=1.0, key=f"time_{idx}")
+                                st.session_state.workout_exercises[idx]["time_seconds"] = int(time_minutes * 60) if time_minutes > 0 else None
+                            
+                            with col3:
+                                distance_val = ex_record.get("distance")
+                                if distance_val is None:
+                                    distance_val = 0.0
+                                distance = st.number_input("Distance (mi)", min_value=0.0, value=float(distance_val), step=0.1, key=f"distance_{idx}")
+                                st.session_state.workout_exercises[idx]["distance"] = distance if distance > 0 else None
+                                st.session_state.workout_exercises[idx]["distance_unit"] = "mi"
+                            
+                            with col4:
+                                st.write("")  # Spacing
+                                st.write("")  # Spacing
+                                # Individual save button for this exercise
+                                if st.button("💾", key=f"save_{idx}", help=f"Save {exercise_name}"):
+                                    try:
+                                        workout_datetime = datetime.combine(workout_date, workout_time)
+                                        
+                                        # Create workout record with just this one exercise (cardio)
+                                        workout_data = {
+                                            "workout_id": workout_id,
+                                            "workout_name": selected_workout if selected_workout != "Custom Workout" else f"{exercise_name}",
+                                            "workout_date": workout_datetime.isoformat(),
+                                            "duration_minutes": duration,
+                                            "notes": None,
+                                            "exercises": [
+                                                {
+                                                    "exercise_id": ex_record["exercise_id"],
+                                                    "time_seconds": ex_record.get("time_seconds"),
+                                                    "distance": ex_record.get("distance"),
+                                                    "distance_unit": ex_record.get("distance_unit", "mi")
+                                                }
+                                            ]
+                                        }
+                                        
+                                        response = make_authenticated_request("POST", "/workouts/records", json=workout_data)
+                                        
+                                        if response.status_code == 201:
+                                            st.success(f"✅ {exercise_name} saved!")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Failed to save {exercise_name}: {response.text}")
+                                    
+                                    except Exception as e:
+                                        st.error(f"Error saving {exercise_name}: {str(e)}")
+                            
+                            with col5:
+                                st.write("")  # Spacing
+                                st.write("")  # Spacing
+                                if st.button("❌", key=f"remove_{idx}"):
+                                    st.session_state.workout_exercises.pop(idx)
+                                    st.rerun()
+                        else:
+                            # Strength fields: Sets, Reps, Weight
+                            with col2:
+                                sets = st.number_input("Sets", min_value=1, value=ex_record.get("sets", 3), key=f"sets_{idx}")
+                                st.session_state.workout_exercises[idx]["sets"] = sets
+                            with col3:
+                                reps = st.number_input("Reps", min_value=1, value=ex_record.get("reps", 10), key=f"reps_{idx}")
+                                st.session_state.workout_exercises[idx]["reps"] = reps
+                            with col4:
+                                weight_val = ex_record.get("weight")
+                                if weight_val is None:
+                                    weight_val = 0.0
+                                weight = st.number_input("Weight (lbs)", min_value=0.0, value=float(weight_val), step=2.5, key=f"weight_{idx}")
+                                st.session_state.workout_exercises[idx]["weight"] = weight
+                            with col5:
+                                st.write("")  # Spacing
+                                st.write("")  # Spacing
+                                # Individual save button for this exercise
+                                if st.button("💾", key=f"save_{idx}", help=f"Save {exercise_name}"):
+                                    try:
+                                        workout_datetime = datetime.combine(workout_date, workout_time)
+                                        
+                                        # Create workout record with just this one exercise (strength)
+                                        workout_data = {
+                                            "workout_id": workout_id,
+                                            "workout_name": selected_workout if selected_workout != "Custom Workout" else f"{exercise_name}",
+                                            "workout_date": workout_datetime.isoformat(),
+                                            "duration_minutes": duration,
+                                            "notes": None,
+                                            "exercises": [
+                                                {
+                                                    "exercise_id": ex_record["exercise_id"],
+                                                    "sets": ex_record["sets"],
+                                                    "reps": ex_record["reps"],
+                                                    "weight": ex_record["weight"],
+                                                    "weight_unit": "lbs"
+                                                }
+                                            ]
+                                        }
+                                        
+                                        response = make_authenticated_request("POST", "/workouts/records", json=workout_data)
+                                        
+                                        if response.status_code == 201:
+                                            st.success(f"✅ {exercise_name} saved!")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Failed to save {exercise_name}: {response.text}")
+                                    
+                                    except Exception as e:
+                                        st.error(f"Error saving {exercise_name}: {str(e)}")
+                            with col6:
+                                st.write("")  # Spacing
+                                st.write("")  # Spacing
+                                if st.button("❌", key=f"remove_{idx}"):
+                                    st.session_state.workout_exercises.pop(idx)
+                                    st.rerun()
                 
                 # Add exercise button
                 st.markdown("---")
@@ -5420,13 +5667,19 @@ def log_workout_page():
                     st.write("")  # Spacing
                     st.write("")  # Spacing
                     if st.button("➕ Add"):
-                        st.session_state.workout_exercises.append({
+                        exercise_name = exercise_to_add["name"]
+                        is_cardio = is_cardio_exercise(exercise_name)
+                        exercise_data = {
                             "exercise_id": exercise_to_add["id"],
-                            "exercise_name": exercise_to_add["name"],
-                            "sets": 3,
-                            "reps": 10,
-                            "weight": 0.0
-                        })
+                            "exercise_name": exercise_name,
+                            "sets": 3 if not is_cardio else None,
+                            "reps": 10 if not is_cardio else None,
+                            "weight": 0.0 if not is_cardio else None,
+                            "time_seconds": None if not is_cardio else None,
+                            "distance": None if not is_cardio else None,
+                            "distance_unit": "mi" if is_cardio else None
+                        }
+                        st.session_state.workout_exercises.append(exercise_data)
                         st.rerun()
                 
                 # Submit workout
@@ -5440,22 +5693,35 @@ def log_workout_page():
                         try:
                             workout_datetime = datetime.combine(workout_date, workout_time)
                             
+                            # Build exercise data - handle cardio vs strength exercises
+                            exercises_data = []
+                            for ex in st.session_state.workout_exercises:
+                                exercise_name = ex.get("exercise_name", "")
+                                is_cardio = is_cardio_exercise(exercise_name)
+                                
+                                if is_cardio:
+                                    exercises_data.append({
+                                        "exercise_id": ex["exercise_id"],
+                                        "time_seconds": ex.get("time_seconds"),
+                                        "distance": ex.get("distance"),
+                                        "distance_unit": ex.get("distance_unit", "mi")
+                                    })
+                                else:
+                                    exercises_data.append({
+                                        "exercise_id": ex["exercise_id"],
+                                        "sets": ex.get("sets"),
+                                        "reps": ex.get("reps"),
+                                        "weight": ex.get("weight"),
+                                        "weight_unit": "lbs"
+                                    })
+                            
                             workout_data = {
                                 "workout_id": workout_id,
                                 "workout_name": selected_workout,
                                 "workout_date": workout_datetime.isoformat(),
                                 "duration_minutes": duration,
                                 "notes": notes if notes else None,
-                                "exercises": [
-                                    {
-                                        "exercise_id": ex["exercise_id"],
-                                        "sets": ex["sets"],
-                                        "reps": ex["reps"],
-                                        "weight": ex["weight"],
-                                        "weight_unit": "lbs"
-                                    }
-                                    for ex in st.session_state.workout_exercises
-                                ]
+                                "exercises": exercises_data
                             }
                             
                             response = make_authenticated_request("POST", "/workouts/records", json=workout_data)
@@ -5563,6 +5829,18 @@ def exercises_page():
     st.title("🏋️ Exercise Library")
     st.markdown("---")
     
+    # Check for exercise_id in query params (from workout tracker navigation)
+    query_params = get_query_params()
+    target_exercise_id = None
+    try:
+        if "exercise_id" in query_params:
+            exercise_id_param = query_params["exercise_id"]
+            if isinstance(exercise_id_param, list) and len(exercise_id_param) > 0:
+                exercise_id_param = exercise_id_param[0]
+            target_exercise_id = int(exercise_id_param)
+    except (ValueError, TypeError):
+        pass
+    
     tab1, tab2 = st.tabs(["View Exercises", "Add Exercise"])
     
     with tab1:
@@ -5593,8 +5871,10 @@ def exercises_page():
                     # Display exercises in a grid
                     for exercise in exercises:
                         with st.container():
+                            # Auto-expand if this is the target exercise from query params
+                            should_expand = target_exercise_id is not None and exercise.get('id') == target_exercise_id
                             # Use expander to show exercise details
-                            with st.expander(f"**{exercise['name']}** ({exercise.get('primary_muscle', 'N/A')})", expanded=False):
+                            with st.expander(f"**{exercise['name']}** ({exercise.get('primary_muscle', 'N/A')})", expanded=should_expand):
                                 col1, col2 = st.columns([1, 2])
                                 
                                 with col1:
