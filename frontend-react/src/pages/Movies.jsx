@@ -257,6 +257,14 @@ export default function Movies() {
           >
             ⚙️ Manage Movies
           </button>
+          <button
+            onClick={() => {
+              setActiveTab('details');
+            }}
+            style={activeTab === 'details' ? styles.activeTab : styles.tab}
+          >
+            📋 Movie Details
+          </button>
         </div>
 
         {/* Year Filter and Options - shown in both tabs */}
@@ -280,15 +288,17 @@ export default function Movies() {
           </div>
           
           <div style={styles.controlsRight}>
-            <label style={styles.checkboxLabel}>
-              <input
-                type="checkbox"
-                checked={showWantToWatchOnly}
-                onChange={(e) => setShowWantToWatchOnly(e.target.checked)}
-                style={styles.checkbox}
-              />
-              In My Queue
-            </label>
+            {activeTab !== 'details' && (
+              <label style={styles.checkboxLabel}>
+                <input
+                  type="checkbox"
+                  checked={showWantToWatchOnly}
+                  onChange={(e) => setShowWantToWatchOnly(e.target.checked)}
+                  style={styles.checkbox}
+                />
+                In My Queue
+              </label>
+            )}
             
             {activeTab === 'view' && (
               <label style={styles.checkboxLabel}>
@@ -584,49 +594,51 @@ export default function Movies() {
           </div>
         ) : activeTab === 'view' ? (
           // View Mode - Clean browsing without edit/delete buttons
-          <>
-            <div style={styles.moviesGrid}>
-              {movies.map((movie) => (
-                <div key={movie.id} style={styles.movieCard}>
-                  {movie.thumbnail_url && (
-                    <img
-                      src={movie.thumbnail_url}
-                      alt={movie.title}
-                      style={styles.thumbnail}
-                      onError={(e) => {
-                        e.target.style.display = 'none';
-                      }}
-                    />
+          <div style={styles.moviesGrid}>
+            {movies.map((movie) => (
+              <div key={movie.id} style={styles.movieCard}>
+                {movie.thumbnail_url && (
+                  <img
+                    src={movie.thumbnail_url}
+                    alt={movie.title}
+                    style={styles.thumbnail}
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                    }}
+                  />
+                )}
+                {!movie.thumbnail_url && (
+                  <div style={styles.thumbnailPlaceholder}>🎬</div>
+                )}
+                <div style={styles.movieInfo}>
+                  <h3 style={styles.movieTitle}>{movie.title}</h3>
+                  {movie.year && <p style={styles.movieYear}>{movie.year}</p>}
+                  {movie.rating && (
+                    <p style={styles.movieRating}>⭐ {movie.rating}/10</p>
                   )}
-                  {!movie.thumbnail_url && (
-                    <div style={styles.thumbnailPlaceholder}>🎬</div>
+                  {movie.watched_date && (
+                    <p style={styles.movieDate}>
+                      Watched: {new Date(movie.watched_date).toLocaleDateString()}
+                    </p>
                   )}
-                  <div style={styles.movieInfo}>
-                    <h3 style={styles.movieTitle}>{movie.title}</h3>
-                    {movie.year && <p style={styles.movieYear}>{movie.year}</p>}
-                    {movie.rating && (
-                      <p style={styles.movieRating}>⭐ {movie.rating}/10</p>
-                    )}
-                    {movie.watched_date && (
-                      <p style={styles.movieDate}>
-                        Watched: {new Date(movie.watched_date).toLocaleDateString()}
-                      </p>
-                    )}
-                    {movie.status && (
-                      <span style={styles.badge}>{movie.status}</span>
-                    )}
-                    {showNotes && movie.notes && (
-                      <p style={styles.movieNotes}>{movie.notes}</p>
-                    )}
-                  </div>
+                  {movie.status && (
+                    <span style={styles.badge}>{movie.status}</span>
+                  )}
+                  {showNotes && movie.notes && (
+                    <p style={styles.movieNotes}>{movie.notes}</p>
+                  )}
                 </div>
-              ))}
-            </div>
-
-            {/* Details Section - View Mode */}
-            <div style={styles.detailsSection}>
-              <h2 style={styles.detailsTitle}>Movie Details</h2>
-              {movies.map((movie) => (
+              </div>
+            ))}
+          </div>
+        ) : activeTab === 'details' ? (
+          // Details Tab - Expandable details view
+          <div style={styles.detailsSection}>
+            <h2 style={styles.detailsTitle}>Movie Details</h2>
+            {movies.length === 0 ? (
+              <div style={styles.empty}>No movies found. Add movies in the Manage Movies tab!</div>
+            ) : (
+              movies.map((movie) => (
                 <div key={movie.id} style={styles.detailCard}>
                   <div
                     style={styles.detailHeader}
@@ -668,9 +680,9 @@ export default function Movies() {
                     </div>
                   )}
                 </div>
-              ))}
-            </div>
-          </>
+              ))
+            )}
+          </div>
         ) : (
           // Manage Mode - With edit/delete buttons
           <>
@@ -723,64 +735,6 @@ export default function Movies() {
               ))}
             </div>
 
-            {/* Details Section - Manage Mode */}
-            <div style={styles.detailsSection}>
-              <h2 style={styles.detailsTitle}>Movie Details</h2>
-              {movies.map((movie) => (
-                <div key={movie.id} style={styles.detailCard}>
-                  <div
-                    style={styles.detailHeader}
-                    onClick={() => toggleExpanded(movie.id)}
-                  >
-                    <div>
-                      <strong>{movie.title}</strong>
-                      {movie.year && <span style={styles.detailYear}> ({movie.year})</span>}
-                      {movie.watched_date && (
-                        <span style={styles.detailDate}>
-                          {' - '}
-                          {new Date(movie.watched_date).toLocaleDateString()}
-                        </span>
-                      )}
-                    </div>
-                    <span style={styles.expandIcon}>
-                      {expandedMovies.has(movie.id) ? '▼' : '▶'}
-                    </span>
-                  </div>
-                  
-                  {expandedMovies.has(movie.id) && (
-                    <div style={styles.detailContent}>
-                      <div style={styles.detailRow}>
-                        <div style={styles.detailCol}>
-                          <strong>Watched:</strong> {movie.watched_date ? new Date(movie.watched_date).toLocaleDateString() : 'N/A'}
-                        </div>
-                        <div style={styles.detailCol}>
-                          <strong>Rating:</strong> {movie.rating ? `${movie.rating}/10` : 'N/A'}
-                        </div>
-                        <div style={styles.detailCol}>
-                          <button
-                            onClick={() => handleEdit(movie)}
-                            style={styles.editButton}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleDelete(movie.id)}
-                            style={styles.deleteButton}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                      {movie.notes && (
-                        <div style={styles.detailNotes}>
-                          <strong>Notes:</strong> {movie.notes}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
           </>
         )}
       </div>
@@ -792,14 +746,18 @@ const styles = {
   container: {
     minHeight: '100vh',
     backgroundColor: '#f5f5f5',
+    width: '100%',
+    boxSizing: 'border-box',
   },
   header: {
     backgroundColor: 'white',
-    padding: '1rem 2rem',
+    padding: 'clamp(0.75rem, 2vw, 1rem) clamp(1rem, 4vw, 2rem)',
     boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    width: '100%',
+    boxSizing: 'border-box',
   },
   title: {
     margin: 0,
@@ -823,9 +781,11 @@ const styles = {
     cursor: 'pointer',
   },
   content: {
-    maxWidth: '1200px',
+    width: '100%',
+    maxWidth: '100%',
     margin: '0 auto',
-    padding: '2rem',
+    padding: 'clamp(1rem, 3vw, 2rem)',
+    boxSizing: 'border-box',
   },
   tabContainer: {
     display: 'flex',
@@ -918,10 +878,12 @@ const styles = {
   },
   formCard: {
     backgroundColor: 'white',
-    padding: '2rem',
+    padding: 'clamp(1rem, 3vw, 2rem)',
     borderRadius: '8px',
     boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
     marginBottom: '2rem',
+    width: '100%',
+    boxSizing: 'border-box',
   },
   formTitle: {
     marginTop: 0,
@@ -1139,9 +1101,10 @@ const styles = {
   },
   moviesGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
-    gap: '1.5rem',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(min(250px, 100%), 1fr))',
+    gap: 'clamp(1rem, 2vw, 1.5rem)',
     marginBottom: '3rem',
+    width: '100%',
   },
   movieCard: {
     backgroundColor: 'white',
@@ -1229,9 +1192,11 @@ const styles = {
   detailsSection: {
     marginTop: '3rem',
     backgroundColor: 'white',
-    padding: '2rem',
+    padding: 'clamp(1rem, 3vw, 2rem)',
     borderRadius: '8px',
     boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+    width: '100%',
+    boxSizing: 'border-box',
   },
   detailsTitle: {
     marginTop: 0,
