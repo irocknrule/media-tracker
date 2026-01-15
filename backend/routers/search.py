@@ -82,6 +82,73 @@ def search_movies(
         return {"results": []}
 
 
+@router.get("/movies/details")
+def get_movie_details(
+    title: str,
+    year: Optional[str] = None
+):
+    """Get detailed movie information from OMDB API by title and optional year"""
+    try:
+        if OMDB_API_KEY == "free" or not OMDB_API_KEY:
+            return {"error": "OMDB API key not configured"}
+        
+        # Build query - try with year first if provided
+        encoded_title = quote(title)
+        if year:
+            url = f"http://www.omdbapi.com/?apikey={OMDB_API_KEY}&t={encoded_title}&y={year}&plot=full"
+        else:
+            url = f"http://www.omdbapi.com/?apikey={OMDB_API_KEY}&t={encoded_title}&plot=full"
+        
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get("Response") == "False":
+            return {"error": data.get("Error", "Movie not found")}
+        
+        # Extract ratings from various sources
+        ratings = []
+        if "Ratings" in data:
+            for rating in data.get("Ratings", []):
+                source = rating.get("Source", "")
+                value = rating.get("Value", "")
+                ratings.append({"source": source, "value": value})
+        
+        # Parse runtime (format: "142 min")
+        runtime = data.get("Runtime", "")
+        runtime_minutes = None
+        if runtime and runtime != "N/A":
+            try:
+                runtime_minutes = int(runtime.replace(" min", "").strip())
+            except:
+                pass
+        
+        return {
+            "title": data.get("Title", ""),
+            "year": data.get("Year", ""),
+            "rated": data.get("Rated", ""),  # MPAA rating (PG-13, R, etc.)
+            "released": data.get("Released", ""),
+            "runtime": runtime,
+            "runtime_minutes": runtime_minutes,
+            "genres": data.get("Genre", "").split(", ") if data.get("Genre") else [],
+            "director": data.get("Director", ""),
+            "writer": data.get("Writer", ""),
+            "actors": data.get("Actors", "").split(", ") if data.get("Actors") else [],
+            "plot": data.get("Plot", ""),
+            "language": data.get("Language", ""),
+            "country": data.get("Country", ""),
+            "awards": data.get("Awards", ""),
+            "poster": data.get("Poster", ""),
+            "ratings": ratings,
+            "imdb_rating": data.get("imdbRating", ""),
+            "imdb_votes": data.get("imdbVotes", ""),
+            "imdb_id": data.get("imdbID", ""),
+            "metascore": data.get("Metascore", ""),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @router.get("/tv-shows")
 def search_tv_shows(
     query: str
