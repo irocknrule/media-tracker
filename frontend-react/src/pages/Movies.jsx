@@ -31,7 +31,7 @@ export default function Movies() {
 
   useEffect(() => {
     loadMovies();
-  }, [yearFilter, showWantToWatchOnly]);
+  }, [yearFilter, showWantToWatchOnly, activeTab]);
 
   const loadMovies = async () => {
     try {
@@ -40,9 +40,16 @@ export default function Movies() {
       const params = yearFilter ? { year: parseInt(yearFilter) } : {};
       const data = await movieService.getAll(params);
       
-      // Filter by status if "Want to watch only" is enabled
+      // Filter movies based on active tab and filters
       let filteredData = data || [];
-      if (showWantToWatchOnly) {
+      
+      if (activeTab === 'view') {
+        // View tab: Only show watched movies
+        filteredData = filteredData.filter(movie => movie.status === 'watched');
+      }
+      
+      // Apply "Want to watch only" filter (only in Manage tab)
+      if (activeTab === 'manage' && showWantToWatchOnly) {
         filteredData = filteredData.filter(movie => movie.status === 'want_to_watch');
       }
       
