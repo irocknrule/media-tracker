@@ -5,6 +5,8 @@ import Login from './pages/Login';
 import Home from './pages/Home';
 import Movies from './pages/Movies';
 import TVShows from './pages/TVShows';
+import Books from './pages/Books';
+import Music from './pages/Music';
 
 function PrivateRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -56,6 +58,22 @@ function AppRoutes() {
         element={
           <PrivateRoute>
             <TVShows />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/books"
+        element={
+          <PrivateRoute>
+            <Books />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/music"
+        element={
+          <PrivateRoute>
+            <Music />
           </PrivateRoute>
         }
       />

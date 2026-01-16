@@ -32,4 +32,36 @@ export const searchService = {
       return [];
     }
   },
+
+  searchBooks: async (query) => {
+    if (!query || query.length < 2) {
+      return [];
+    }
+    
+    try {
+      const response = await api.get('/search/books', {
+        params: { query },
+      });
+      return response.data.results || [];
+    } catch (error) {
+      console.error('Book search error:', error);
+      return [];
+    }
+  },
+
+  searchMusic: async (query) => {
+    if (!query || query.length < 2) {
+      return [];
+    }
+    
+    try {
+      const response = await api.get('/search/music', {
+        params: { query },
+      });
+      return response.data.results || [];
+    } catch (error) {
+      console.error('Music search error:', error);
+      return [];
+    }
+  },
 };

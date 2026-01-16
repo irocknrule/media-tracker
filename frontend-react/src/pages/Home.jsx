@@ -124,20 +124,35 @@ export default function Home() {
               </p>
             </div>
 
-            {/* Placeholder for future sections */}
-            <div style={styles.navCardPlaceholder}>
+            <div
+              style={{
+                ...styles.navCard,
+                ...(hoveredCard === 'books' ? styles.navCardHover : {}),
+              }}
+              onClick={() => navigate('/books')}
+              onMouseEnter={() => setHoveredCard('books')}
+              onMouseLeave={() => setHoveredCard(null)}
+            >
               <div style={styles.navIcon}>📖</div>
               <h3 style={styles.navTitle}>Books</h3>
               <p style={styles.navDescription}>
-                Coming soon - Track books you've read
+                Track books you've read, want to read, or are currently reading
               </p>
             </div>
 
-            <div style={styles.navCardPlaceholder}>
+            <div
+              style={{
+                ...styles.navCard,
+                ...(hoveredCard === 'music' ? styles.navCardHover : {}),
+              }}
+              onClick={() => navigate('/music')}
+              onMouseEnter={() => setHoveredCard('music')}
+              onMouseLeave={() => setHoveredCard(null)}
+            >
               <div style={styles.navIcon}>🎵</div>
               <h3 style={styles.navTitle}>Music</h3>
               <p style={styles.navDescription}>
-                Coming soon - Track albums and songs
+                Track albums and songs you've listened to
               </p>
             </div>
           </div>
@@ -168,6 +183,28 @@ export default function Home() {
               onMouseLeave={() => setHoveredCard(null)}
             >
               ➕ Add TV Show
+            </button>
+            <button
+              style={{
+                ...styles.actionButton,
+                ...(hoveredCard === 'add-book' ? styles.actionButtonHover : {}),
+              }}
+              onClick={() => navigate('/books')}
+              onMouseEnter={() => setHoveredCard('add-book')}
+              onMouseLeave={() => setHoveredCard(null)}
+            >
+              ➕ Add Book
+            </button>
+            <button
+              style={{
+                ...styles.actionButton,
+                ...(hoveredCard === 'add-music' ? styles.actionButtonHover : {}),
+              }}
+              onClick={() => navigate('/music')}
+              onMouseEnter={() => setHoveredCard('add-music')}
+              onMouseLeave={() => setHoveredCard(null)}
+            >
+              ➕ Add Music
             </button>
           </div>
         </div>
