@@ -8,6 +8,7 @@ import TVShows from './pages/TVShows';
 import Books from './pages/Books';
 import Music from './pages/Music';
 import Habits from './pages/Habits';
+import Workouts from './pages/Workouts';
 
 function PrivateRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -83,6 +84,14 @@ function AppRoutes() {
         element={
           <PrivateRoute>
             <Habits />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/workouts"
+        element={
+          <PrivateRoute>
+            <Workouts />
           </PrivateRoute>
         }
       />

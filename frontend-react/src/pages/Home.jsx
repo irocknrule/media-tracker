@@ -171,6 +171,22 @@ export default function Home() {
                 Track daily habits including exercise, mindfulness, and music practice
               </p>
             </div>
+
+            <div
+              style={{
+                ...styles.navCard,
+                ...(hoveredCard === 'workouts' ? styles.navCardHover : {}),
+              }}
+              onClick={() => navigate('/workouts')}
+              onMouseEnter={() => setHoveredCard('workouts')}
+              onMouseLeave={() => setHoveredCard(null)}
+            >
+              <div style={styles.navIcon}>💪</div>
+              <h3 style={styles.navTitle}>Workout Tracker</h3>
+              <p style={styles.navDescription}>
+                Track workouts, manage exercises, and create workout templates
+              </p>
+            </div>
           </div>
         </div>
 
