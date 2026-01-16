@@ -12,7 +12,7 @@ export default function TVShows() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [yearFilter, setYearFilter] = useState('');
-  const [activeTab, setActiveTab] = useState('view'); // 'view', 'manage', 'details'
+  const [activeTab, setActiveTab] = useState('view'); // 'view', 'manage', 'details', 'currently_watching'
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingShow, setEditingShow] = useState(null);
   const [editingSeason, setEditingSeason] = useState(null);
@@ -59,6 +59,9 @@ export default function TVShows() {
       if (activeTab === 'view') {
         // View tab: Only show watched shows
         filteredData = filteredData.filter(show => show.status === 'watched');
+      } else if (activeTab === 'currently_watching') {
+        // Currently Watching tab: Only show currently watching shows
+        filteredData = filteredData.filter(show => show.status === 'currently_watching');
       }
       
       // Apply "Want to watch only" filter (only in Manage tab)
@@ -387,6 +390,16 @@ export default function TVShows() {
           </button>
           <button
             onClick={() => {
+              setActiveTab('currently_watching');
+              setShowAddForm(false);
+              resetForm();
+            }}
+            style={activeTab === 'currently_watching' ? styles.activeTab : styles.tab}
+          >
+            👀 Currently Watching
+          </button>
+          <button
+            onClick={() => {
               setActiveTab('manage');
             }}
             style={activeTab === 'manage' ? styles.activeTab : styles.tab}
@@ -424,7 +437,7 @@ export default function TVShows() {
           </div>
           
           <div style={styles.controlsRight}>
-            {activeTab !== 'details' && (
+            {activeTab === 'manage' && (
               <label style={styles.checkboxLabel}>
                 <input
                   type="checkbox"
@@ -436,7 +449,7 @@ export default function TVShows() {
               </label>
             )}
             
-            {activeTab === 'view' && (
+            {(activeTab === 'view' || activeTab === 'currently_watching') && (
               <label style={styles.checkboxLabel}>
                 <input
                   type="checkbox"
@@ -803,10 +816,12 @@ export default function TVShows() {
           <div style={styles.empty}>
             {activeTab === 'view' 
               ? 'No TV shows found. Switch to Manage tab to add TV shows!' 
+              : activeTab === 'currently_watching'
+              ? 'No currently watching shows. Add shows and mark them as "Currently Watching"!'
               : 'No TV shows found. Add your first TV show!'}
           </div>
-        ) : activeTab === 'view' ? (
-          // View Mode - Clean browsing without edit/delete buttons
+        ) : (activeTab === 'view' || activeTab === 'currently_watching') ? (
+          // View Mode / Currently Watching Mode - Clean browsing without edit/delete buttons
           <div style={styles.showsGrid}>
             {tvShows.map((show) => (
               <div key={show.id} style={styles.showCard}>
