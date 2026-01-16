@@ -34,7 +34,7 @@ export default function Login() {
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-        <h1 style={styles.title}>Media Tracker</h1>
+        <h1 style={styles.title}>Personal Tracker</h1>
         <h2 style={styles.subtitle}>Login</h2>
         
         {error && (

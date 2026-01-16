@@ -54,7 +54,7 @@ export default function Home() {
   return (
     <div style={styles.container}>
       <header style={styles.header}>
-        <h1 style={styles.title}>📚 Media Tracker</h1>
+        <h1 style={styles.title}>📚 Personal Tracker</h1>
         <div style={styles.headerActions}>
           <span style={styles.userInfo}>Welcome, {user?.username || 'User'}</span>
           <button onClick={logout} style={styles.logoutButton}>
@@ -185,6 +185,22 @@ export default function Home() {
               <h3 style={styles.navTitle}>Workout Tracker</h3>
               <p style={styles.navDescription}>
                 Track workouts, manage exercises, and create workout templates
+              </p>
+            </div>
+
+            <div
+              style={{
+                ...styles.navCard,
+                ...(hoveredCard === 'portfolio' ? styles.navCardHover : {}),
+              }}
+              onClick={() => navigate('/portfolio')}
+              onMouseEnter={() => setHoveredCard('portfolio')}
+              onMouseLeave={() => setHoveredCard(null)}
+            >
+              <div style={styles.navIcon}>💼</div>
+              <h3 style={styles.navTitle}>Portfolio Tracker</h3>
+              <p style={styles.navDescription}>
+                Track investments, view holdings, manage transactions, and monitor asset allocation
               </p>
             </div>
           </div>
