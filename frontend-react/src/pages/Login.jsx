@@ -19,7 +19,7 @@ export default function Login() {
     const result = await login(username, password);
     
     if (result.success) {
-      navigate('/movies');
+      navigate('/');
     } else {
       // Ensure error is a string, not an object
       const errorMessage = typeof result.error === 'string' 
