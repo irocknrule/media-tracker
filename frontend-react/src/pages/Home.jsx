@@ -155,6 +155,22 @@ export default function Home() {
                 Track albums and songs you've listened to
               </p>
             </div>
+
+            <div
+              style={{
+                ...styles.navCard,
+                ...(hoveredCard === 'habits' ? styles.navCardHover : {}),
+              }}
+              onClick={() => navigate('/habits')}
+              onMouseEnter={() => setHoveredCard('habits')}
+              onMouseLeave={() => setHoveredCard(null)}
+            >
+              <div style={styles.navIcon}>📅</div>
+              <h3 style={styles.navTitle}>Habit Tracker</h3>
+              <p style={styles.navDescription}>
+                Track daily habits including exercise, mindfulness, and music practice
+              </p>
+            </div>
           </div>
         </div>
 
