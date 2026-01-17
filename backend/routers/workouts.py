@@ -10,7 +10,8 @@ from backend.models import (
     Workout as WorkoutModel,
     WorkoutExercise as WorkoutExerciseModel,
     WorkoutRecord as WorkoutRecordModel,
-    ExerciseRecord as ExerciseRecordModel
+    ExerciseRecord as ExerciseRecordModel,
+    HabitLog as HabitLogModel
 )
 from backend.schemas import (
     Exercise,
@@ -388,6 +389,27 @@ def create_workout_record(record: WorkoutRecordCreate, db: Session = Depends(get
         )
         db.add(exercise_record)
     
+    # Create/update habit log entry for this workout
+    if record.duration_minutes:
+        # Convert workout_date (datetime) to date
+        workout_date = record.workout_date.date() if isinstance(record.workout_date, datetime) else record.workout_date
+        
+        # Delete existing exercise_workout habit logs for this date (to avoid duplicates)
+        db.query(HabitLogModel).filter(
+            HabitLogModel.date == workout_date,
+            HabitLogModel.habit_type == "exercise_workout"
+        ).delete()
+        
+        # Create new habit log entry
+        habit_log = HabitLogModel(
+            date=workout_date,
+            habit_type="exercise_workout",
+            metric_name="minutes",
+            value=float(record.duration_minutes),
+            unit="min"
+        )
+        db.add(habit_log)
+    
     db.commit()
     db.refresh(db_record)
     
@@ -454,8 +476,38 @@ def update_workout_record(
     if not db_record:
         raise HTTPException(status_code=404, detail="Workout record not found")
     
+    # Store old date for habit log cleanup if date changes
+    old_date = db_record.workout_date.date() if isinstance(db_record.workout_date, datetime) else db_record.workout_date
+    
     for field, value in record_update.model_dump(exclude_unset=True).items():
         setattr(db_record, field, value)
+    
+    # Get new workout date
+    workout_date = db_record.workout_date.date() if isinstance(db_record.workout_date, datetime) else db_record.workout_date
+    
+    # If date changed, delete old habit log
+    if old_date != workout_date:
+        db.query(HabitLogModel).filter(
+            HabitLogModel.date == old_date,
+            HabitLogModel.habit_type == "exercise_workout"
+        ).delete()
+    
+    # Always delete existing habit log for current date (will recreate if duration_minutes exists)
+    db.query(HabitLogModel).filter(
+        HabitLogModel.date == workout_date,
+        HabitLogModel.habit_type == "exercise_workout"
+    ).delete()
+    
+    # Create new habit log entry if duration_minutes is set
+    if db_record.duration_minutes:
+        habit_log = HabitLogModel(
+            date=workout_date,
+            habit_type="exercise_workout",
+            metric_name="minutes",
+            value=float(db_record.duration_minutes),
+            unit="min"
+        )
+        db.add(habit_log)
     
     db.commit()
     db.refresh(db_record)
@@ -470,7 +522,18 @@ def delete_workout_record(record_id: int, db: Session = Depends(get_db)):
     if not db_record:
         raise HTTPException(status_code=404, detail="Workout record not found")
     
+    # Get workout date before deleting
+    workout_date = db_record.workout_date.date() if isinstance(db_record.workout_date, datetime) else db_record.workout_date
+    
+    # Delete the workout record
     db.delete(db_record)
+    
+    # Delete associated habit log
+    db.query(HabitLogModel).filter(
+        HabitLogModel.date == workout_date,
+        HabitLogModel.habit_type == "exercise_workout"
+    ).delete()
+    
     db.commit()
     return None
 
