@@ -13,6 +13,34 @@ from backend.schemas import (
 
 router = APIRouter(prefix="/tv-shows", tags=["tv-shows"])
 
+def _recalculate_show_overall_rating(db: Session, show_id: int) -> None:
+    """
+    Keep `tv_shows.overall_rating` in sync with season ratings.
+
+    Current behavior: overall_rating is the average of all non-null season ratings
+    rounded to 1 decimal, or NULL if no season ratings exist.
+    """
+    db_show = db.query(TVShowModel).filter(TVShowModel.id == show_id).first()
+    if not db_show:
+        return
+
+    rating_rows = (
+        db.query(TVShowSeasonModel.rating)
+        .filter(
+            TVShowSeasonModel.show_id == show_id,
+            TVShowSeasonModel.rating.isnot(None),
+        )
+        .all()
+    )
+
+    ratings = [r for (r,) in rating_rows if r is not None]
+    if not ratings:
+        db_show.overall_rating = None
+        return
+
+    avg = sum(ratings) / len(ratings)
+    db_show.overall_rating = round(avg, 1)
+
 
 # Show-level endpoints
 @router.get("/", response_model=List[TVShow])
@@ -156,6 +184,8 @@ def create_season(
     
     db_season = TVShowSeasonModel(**season.dict())
     db.add(db_season)
+    db.flush()
+    _recalculate_show_overall_rating(db, season.show_id)
     db.commit()
     db.refresh(db_season)
     return db_season
@@ -176,6 +206,8 @@ def update_season(
     for field, value in update_data.items():
         setattr(db_season, field, value)
     
+    db.flush()
+    _recalculate_show_overall_rating(db, db_season.show_id)
     db.commit()
     db.refresh(db_season)
     return db_season
@@ -191,7 +223,10 @@ def delete_season(
     if not db_season:
         raise HTTPException(status_code=404, detail="Season not found")
     
+    show_id = db_season.show_id
     db.delete(db_season)
+    db.flush()
+    _recalculate_show_overall_rating(db, show_id)
     db.commit()
     return None
 
@@ -240,6 +275,8 @@ def create_tv_show_legacy(
         season_thumbnail_url=tv_show.thumbnail_url
     )
     db.add(new_season)
+    db.flush()
+    _recalculate_show_overall_rating(db, show_id)
     db.commit()
     
     # Return the updated show with all seasons

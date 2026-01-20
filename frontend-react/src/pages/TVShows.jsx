@@ -42,6 +42,23 @@ export default function TVShows() {
     season_thumbnail_url: '',
   });
 
+  const getDisplayRating = (show) => {
+    const seasonRatings = (show?.seasons || [])
+      .map((s) => s?.rating)
+      .filter((r) => typeof r === 'number' && Number.isFinite(r));
+
+    if (seasonRatings.length > 0) {
+      const avg = seasonRatings.reduce((sum, r) => sum + r, 0) / seasonRatings.length;
+      return Math.round(avg * 10) / 10;
+    }
+
+    if (typeof show?.overall_rating === 'number' && Number.isFinite(show.overall_rating)) {
+      return show.overall_rating;
+    }
+
+    return null;
+  };
+
   useEffect(() => {
     loadTVShows();
   }, [yearFilter, showWantToWatchOnly, activeTab]);
@@ -228,7 +245,10 @@ export default function TVShows() {
           const seasonUpdateData = {
             season_number: formData.season ? parseInt(formData.season) : editingSeason.season_number,
             watched_date: formData.watched_date || null,
-            rating: formData.rating ? parseFloat(formData.rating) : null,
+            rating:
+              formData.rating === null || formData.rating === undefined || formData.rating === ''
+                ? null
+                : parseFloat(formData.rating),
             notes: formData.notes || null,
             season_thumbnail_url: formData.season_thumbnail_url || null,
           };
@@ -243,7 +263,10 @@ export default function TVShows() {
           season: formData.season ? parseInt(formData.season) : 1,
           status: formData.status,
           watched_date: formData.watched_date || null,
-          rating: formData.rating ? parseFloat(formData.rating) : null,
+          rating:
+            formData.rating === null || formData.rating === undefined || formData.rating === ''
+              ? null
+              : parseFloat(formData.rating),
           notes: formData.notes || null,
           thumbnail_url: formData.season_thumbnail_url || formData.show_thumbnail_url || null,
         };
@@ -810,21 +833,24 @@ export default function TVShows() {
         )}
 
         {/* TV Shows Display - different based on active tab */}
-        {loading ? (
-          <div style={styles.loading}>Loading TV shows...</div>
-        ) : tvShows.length === 0 ? (
-          <div style={styles.empty}>
-            {activeTab === 'view' 
-              ? 'No TV shows found. Switch to Manage tab to add TV shows!' 
-              : activeTab === 'currently_watching'
-              ? 'No currently watching shows. Add shows and mark them as "Currently Watching"!'
-              : 'No TV shows found. Add your first TV show!'}
-          </div>
-        ) : (activeTab === 'view' || activeTab === 'currently_watching') ? (
-          // View Mode / Currently Watching Mode - Clean browsing without edit/delete buttons
-          <div style={styles.showsGrid}>
-            {tvShows.map((show) => (
-              <div key={show.id} style={styles.showCard}>
+        {activeTab === 'manage' && showAddForm ? null : (
+          loading ? (
+            <div style={styles.loading}>Loading TV shows...</div>
+          ) : tvShows.length === 0 ? (
+            <div style={styles.empty}>
+              {activeTab === 'view' 
+                ? 'No TV shows found. Switch to Manage tab to add TV shows!' 
+                : activeTab === 'currently_watching'
+                ? 'No currently watching shows. Add shows and mark them as "Currently Watching"!'
+                : 'No TV shows found. Add your first TV show!'}
+            </div>
+          ) : (activeTab === 'view' || activeTab === 'currently_watching') ? (
+            // View Mode / Currently Watching Mode - Clean browsing without edit/delete buttons
+            <div style={styles.showsGrid}>
+              {tvShows.map((show) => {
+                const displayRating = getDisplayRating(show);
+                return (
+                  <div key={show.id} style={styles.showCard}>
                 {show.show_thumbnail_url && (
                   <img
                     src={show.show_thumbnail_url}
@@ -845,8 +871,8 @@ export default function TVShows() {
                   <p style={styles.seasonCount}>
                     {show.seasons?.length || 0} {show.seasons?.length === 1 ? 'season' : 'seasons'}
                   </p>
-                  {show.overall_rating && (
-                    <p style={styles.showRating}>⭐ {show.overall_rating}/10</p>
+                  {displayRating !== null && (
+                    <p style={styles.showRating}>⭐ {displayRating}/10</p>
                   )}
                   {showNotes && show.seasons && show.seasons.length > 0 && (
                     <div style={styles.seasonsNotes}>
@@ -860,9 +886,10 @@ export default function TVShows() {
                     </div>
                   )}
                 </div>
-              </div>
-            ))}
-          </div>
+                  </div>
+                );
+              })}
+            </div>
         ) : activeTab === 'details' ? (
           // Details Tab - Expandable details view
           <div style={styles.detailsSection}>
@@ -879,6 +906,7 @@ export default function TVShows() {
                   return parseInt(b) - parseInt(a);
                 });
 
+                const displayRating = getDisplayRating(show);
                 return (
                   <div key={show.id} style={styles.detailCard}>
                     <div
@@ -902,9 +930,9 @@ export default function TVShows() {
                               <strong>Genres:</strong> {show.genres}
                             </div>
                           )}
-                          {show.overall_rating && (
+                          {displayRating !== null && (
                             <div style={styles.detailCol}>
-                              <strong>Overall Rating:</strong> {show.overall_rating}/10
+                              <strong>Overall Rating:</strong> {displayRating}/10
                             </div>
                           )}
                           <div style={styles.detailCol}>
@@ -946,7 +974,7 @@ export default function TVShows() {
                                               {new Date(season.watched_date).toLocaleDateString()}
                                             </p>
                                           )}
-                                          {season.rating && (
+                                          {season.rating !== null && season.rating !== undefined && (
                                             <p style={styles.seasonRating}>⭐ {season.rating}/10</p>
                                           )}
                                           {season.notes && (
@@ -978,8 +1006,10 @@ export default function TVShows() {
         ) : (
           // Manage Mode - With edit/delete buttons
           <div style={styles.showsGrid}>
-            {tvShows.map((show) => (
-              <div key={show.id} style={styles.showCard}>
+            {tvShows.map((show) => {
+              const displayRating = getDisplayRating(show);
+              return (
+                <div key={show.id} style={styles.showCard}>
                 {show.show_thumbnail_url && (
                   <img
                     src={show.show_thumbnail_url}
@@ -1000,8 +1030,8 @@ export default function TVShows() {
                   <p style={styles.seasonCount}>
                     {show.seasons?.length || 0} {show.seasons?.length === 1 ? 'season' : 'seasons'}
                   </p>
-                  {show.overall_rating && (
-                    <p style={styles.showRating}>⭐ {show.overall_rating}/10</p>
+                  {displayRating !== null && (
+                    <p style={styles.showRating}>⭐ {displayRating}/10</p>
                   )}
                   <div style={styles.statusInput}>
                     <input
@@ -1026,9 +1056,11 @@ export default function TVShows() {
                     </button>
                   </div>
                 </div>
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
+        )}
         )}
       </div>
     </div>
