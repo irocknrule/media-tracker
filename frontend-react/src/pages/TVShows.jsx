@@ -1060,8 +1060,7 @@ export default function TVShows() {
               );
             })}
           </div>
-        )}
-        )}
+        ))}
       </div>
     </div>
   );
