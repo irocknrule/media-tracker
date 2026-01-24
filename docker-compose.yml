@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build: .
@@ -21,25 +19,12 @@ services:
       retries: 3
       start_period: 40s
 
-  frontend:
-    build: .
-    container_name: media-tracker-frontend
-    ports:
-      - "8501:8501"
-    environment:
-      - API_BASE_URL=${API_BASE_URL:-http://backend:8000}
-    depends_on:
-      backend:
-        condition: service_healthy
-    command: streamlit run frontend/app.py --server.address 0.0.0.0 --server.port 8501
-    restart: unless-stopped
-
   frontend-react:
     build:
       context: ./frontend-react
       dockerfile: Dockerfile
       args:
-        - VITE_API_BASE_URL=http://localhost:8000
+        - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8000}
     container_name: media-tracker-frontend-react
     ports:
       - "3000:80"

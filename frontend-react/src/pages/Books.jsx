@@ -51,6 +51,10 @@ export default function Books() {
         filteredData = filteredData.filter(book => book.status === 'finished');
       }
       
+      if (activeTab === 'currently_reading') {
+        filteredData = filteredData.filter(book => book.status === 'currently_reading');
+      }
+      
       if (activeTab === 'manage' && showWantToReadOnly) {
         filteredData = filteredData.filter(book => book.status === 'want_to_read');
       }
@@ -263,6 +267,16 @@ export default function Books() {
           </button>
           <button
             onClick={() => {
+              setActiveTab('currently_reading');
+              setShowAddForm(false);
+              resetForm();
+            }}
+            style={activeTab === 'currently_reading' ? styles.activeTab : styles.tab}
+          >
+            📚 Currently Reading
+          </button>
+          <button
+            onClick={() => {
               setActiveTab('manage');
             }}
             style={activeTab === 'manage' ? styles.activeTab : styles.tab}
@@ -299,7 +313,7 @@ export default function Books() {
           </div>
           
           <div style={styles.controlsRight}>
-            {activeTab !== 'details' && (
+            {activeTab === 'manage' && (
               <label style={styles.checkboxLabel}>
                 <input
                   type="checkbox"
@@ -311,7 +325,7 @@ export default function Books() {
               </label>
             )}
             
-            {activeTab === 'view' && (
+            {(activeTab === 'view' || activeTab === 'currently_reading') && (
               <label style={styles.checkboxLabel}>
                 <input
                   type="checkbox"
@@ -592,9 +606,11 @@ export default function Books() {
           <div style={styles.empty}>
             {activeTab === 'view' 
               ? 'No books found. Switch to Manage tab to add books!' 
+              : activeTab === 'currently_reading'
+              ? 'No currently reading books found. Switch to Manage tab to add books!'
               : 'No books found. Add your first book!'}
           </div>
-        ) : activeTab === 'view' ? (
+        ) : (activeTab === 'view' || activeTab === 'currently_reading') ? (
           <div style={styles.booksGrid}>
             {books.map((book) => (
               <div key={book.id} style={styles.bookCard}>

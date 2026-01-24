@@ -67,18 +67,51 @@ export default function TVShows() {
     try {
       setLoading(true);
       setError('');
-      const params = yearFilter ? { year: parseInt(yearFilter) } : {};
+      const requestedYear = yearFilter ? parseInt(yearFilter, 10) : null;
+      const currentYear = new Date().getFullYear();
+      const params = requestedYear ? { year: requestedYear } : {};
       const data = await tvShowService.getAll(params);
       
       // Filter TV shows based on active tab and filters
       let filteredData = data || [];
+
+      // When filtering by year (non-manage tabs), trim seasons to that year's watched seasons.
+      // For current year, keep in-progress seasons (watched_date null) for currently watching shows.
+      if (requestedYear && activeTab !== 'manage') {
+        filteredData = filteredData.map((show) => {
+          const seasons = Array.isArray(show?.seasons) ? show.seasons : [];
+          const includeInProgress = requestedYear === currentYear && show?.status === 'currently_watching';
+          const filteredSeasons = seasons.filter((season) => {
+            if (season?.watched_date) {
+              return String(season.watched_date).startsWith(`${requestedYear}-`);
+            }
+            return includeInProgress;
+          });
+          return { ...show, seasons: filteredSeasons };
+        });
+      }
       
       if (activeTab === 'view') {
-        // View tab: Only show watched shows
-        filteredData = filteredData.filter(show => show.status === 'watched');
+        // View tab:
+        // - No year filter: only show fully watched shows
+        // - With year filter: show anything that has a watched season in that year (even if show is currently watching now)
+        if (requestedYear) {
+          filteredData = filteredData.filter((show) =>
+            (show?.seasons || []).some((s) => Boolean(s?.watched_date))
+          );
+        } else {
+          filteredData = filteredData.filter((show) => show.status === 'watched');
+        }
       } else if (activeTab === 'currently_watching') {
         // Currently Watching tab: Only show currently watching shows
-        filteredData = filteredData.filter(show => show.status === 'currently_watching');
+        filteredData = filteredData.filter((show) => show.status === 'currently_watching');
+
+        // If a past year is selected, only keep shows that have a watched season in that year
+        if (requestedYear && requestedYear !== currentYear) {
+          filteredData = filteredData.filter((show) =>
+            (show?.seasons || []).some((s) => Boolean(s?.watched_date))
+          );
+        }
       }
       
       // Apply "Want to watch only" filter (only in Manage tab)

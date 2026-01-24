@@ -698,12 +698,18 @@ export default function Portfolio() {
   return (
     <div style={styles.container}>
       <header style={styles.header}>
-        <h1 style={styles.title}>💼 Portfolio Tracker</h1>
+        <div style={styles.headerLeft}>
+          <button
+            onClick={() => navigate('/')}
+            style={styles.homeButton}
+            title="Go to Home"
+          >
+            🏠
+          </button>
+          <h1 style={styles.title}>💼 Portfolio Tracker</h1>
+        </div>
         <div style={styles.headerActions}>
           <span style={styles.userInfo}>Welcome, {user?.username || 'User'}</span>
-          <button onClick={() => navigate('/')} style={styles.backButton}>
-            ← Home
-          </button>
           <button onClick={logout} style={styles.logoutButton}>
             Logout
           </button>
@@ -1246,6 +1252,14 @@ export default function Portfolio() {
                         }}>
                           {tickerHolding.profit_loss !== null
                             ? `${formatCurrency(tickerHolding.profit_loss)} (${formatPercent(tickerHolding.profit_loss_percentage)})`
+                            : 'N/A'}
+                        </div>
+                      </div>
+                      <div style={styles.metricCard}>
+                        <div style={styles.metricLabel}>Current Value</div>
+                        <div style={styles.metricValue}>
+                          {tickerHolding.current_value != null
+                            ? formatCurrency(tickerHolding.current_value)
                             : 'N/A'}
                         </div>
                       </div>
@@ -2102,6 +2116,20 @@ const styles = {
     width: '100%',
     boxSizing: 'border-box',
   },
+  headerLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '1rem',
+  },
+  homeButton: {
+    padding: '0.5rem',
+    backgroundColor: 'transparent',
+    border: 'none',
+    fontSize: '1.5rem',
+    cursor: 'pointer',
+    borderRadius: '4px',
+    transition: 'background-color 0.2s',
+  },
   title: {
     margin: 0,
     fontSize: '1.5rem',
@@ -2114,14 +2142,6 @@ const styles = {
   },
   userInfo: {
     color: '#666',
-  },
-  backButton: {
-    padding: '0.5rem 1rem',
-    backgroundColor: '#6c757d',
-    color: 'white',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
   },
   logoutButton: {
     padding: '0.5rem 1rem',
