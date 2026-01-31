@@ -5,12 +5,14 @@
 
 set -e
 
-# Configuration
+# Configuration - set BACKUP_DIR in .env or export (e.g. your OneDrive folder)
 BACKUP_DIR="${BACKUP_DIR:-$HOME/OneDrive/MediaTracker-Backups}"
 # Alternative cloud services:
+# BACKUP_DIR="$HOME/Library/CloudStorage/OneDrive-Personal/MediaTracker-Backups"
 # BACKUP_DIR="$HOME/Dropbox/MediaTracker-Backups"
 # BACKUP_DIR="$HOME/Google Drive/MediaTracker-Backups"
-# BACKUP_DIR="$HOME/iCloud Drive/MediaTracker-Backups"
+# Also keep a single "latest" copy (overwritten each run) for easy restore. Set to 0 to disable.
+KEEP_LATEST_COPY="${KEEP_LATEST_COPY:-1}"
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DB_SOURCE="$PROJECT_DIR/data/media_tracker.db"
@@ -52,6 +54,8 @@ echo ""
 cp "$DB_SOURCE" "$BACKUP_PATH"
 
 if [ $? -eq 0 ]; then
+    # Optionally keep a single "latest" copy (overwritten each run) so cloud always has current DB
+    [ "$KEEP_LATEST_COPY" = "1" ] && cp "$DB_SOURCE" "$BACKUP_DIR/media_tracker_latest.db"
     # Get file size
     FILE_SIZE=$(du -h "$BACKUP_PATH" | cut -f1)
     echo -e "${GREEN}✅ Backup created successfully!${NC}"
@@ -77,6 +81,7 @@ if [ $? -eq 0 ]; then
         fi
     fi
     
+    [ "$KEEP_LATEST_COPY" = "1" ] && echo "   Latest copy: $BACKUP_DIR/media_tracker_latest.db"
     echo ""
     echo -e "${GREEN}✨ Backup complete!${NC}"
     echo "   Your database is now backed up to: $BACKUP_DIR"

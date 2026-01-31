@@ -25,8 +25,12 @@ This guide explains how to backup your Media Tracker database to cloud services 
 
 **OneDrive (Recommended for Mac):**
 ```bash
+# Personal OneDrive (often here on Mac)
 BACKUP_DIR="$HOME/OneDrive/MediaTracker-Backups"
+# Or if OneDrive is under CloudStorage:
+BACKUP_DIR="$HOME/Library/CloudStorage/OneDrive-Personal/MediaTracker-Backups"
 ```
+You can set this in your project `.env` as `BACKUP_DIR=...` so the backup scripts use it without editing the script.
 
 **Dropbox:**
 ```bash
@@ -85,8 +89,11 @@ You should see:
 ```
 ✅ Backup created successfully!
    File: media_tracker_20240115_143022.db
+   Latest copy: ~/OneDrive/MediaTracker-Backups/media_tracker_latest.db
    Location: ~/OneDrive/MediaTracker-Backups
 ```
+
+The scripts also write **media_tracker_latest.db** (overwritten each run) so your cloud folder always has one current copy for quick restore. To disable, set `KEEP_LATEST_COPY=0` when running the script.
 
 ## Automated Backups
 
