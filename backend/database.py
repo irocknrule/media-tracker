@@ -10,8 +10,8 @@ import logging
 logging.getLogger('passlib').setLevel(logging.ERROR)
 warnings.filterwarnings('ignore', category=UserWarning, module='passlib')
 
-# Database setup
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./media_tracker.db")
+# Database setup: default to data/ so local dev and Docker use the same file
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/media_tracker.db")
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
