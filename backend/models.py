@@ -221,10 +221,10 @@ class ExerciseRecord(Base):
     exercise_id = Column(Integer, ForeignKey("exercises.id"), nullable=False, index=True)
     exercise_name = Column(String, index=True)  # Store name for reference
     
-    # Performance metrics
-    sets = Column(Integer)
-    reps = Column(Integer)
-    weight = Column(Float)
+    # Performance metrics (kept for backward compatibility, calculated from set_records)
+    sets = Column(Integer)  # Total number of sets (calculated from set_records)
+    reps = Column(Integer)  # Average or total reps (for backward compatibility)
+    weight = Column(Float)  # Weight used (for backward compatibility, typically same across sets)
     weight_unit = Column(String, default="lbs")  # "lbs" or "kg"
     
     # For cardio exercises
@@ -238,4 +238,22 @@ class ExerciseRecord(Base):
     # Relationships
     workout_record = relationship("WorkoutRecord", back_populates="exercise_records")
     exercise = relationship("Exercise", back_populates="exercise_records")
+    set_records = relationship("SetRecord", back_populates="exercise_record", cascade="all, delete-orphan", order_by="SetRecord.set_number")
+
+
+class SetRecord(Base):
+    """Individual set record with reps and weight"""
+    __tablename__ = "set_records"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    exercise_record_id = Column(Integer, ForeignKey("exercise_records.id"), nullable=False, index=True)
+    set_number = Column(Integer, nullable=False)  # 1, 2, 3, etc.
+    reps = Column(Integer, nullable=False)
+    weight = Column(Float, nullable=False)
+    weight_unit = Column(String, default="lbs")  # "lbs" or "kg"
+    notes = Column(String)  # Optional notes for this specific set
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    exercise_record = relationship("ExerciseRecord", back_populates="set_records")
 

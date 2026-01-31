@@ -1,13 +1,49 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, nullslast, or_
+from sqlalchemy import desc, nullslast, or_, func
+from sqlalchemy.sql import cast
+from sqlalchemy import Integer
 from typing import List, Optional
 from datetime import date
 from backend.database import get_db
 from backend.models import Book as BookModel
-from backend.schemas import Book, BookCreate, BookUpdate
+from backend.schemas import Book, BookCreate, BookUpdate, BookYearStat
 
 router = APIRouter(prefix="/books", tags=["books"])
+
+
+def get_books_stats_summary(db: Session) -> List[BookYearStat]:
+    """Get book count and total pages per year (by finished_date). Includes years with 0 from earliest data year to current year."""
+    current_year = date.today().year
+    # SQLite-friendly year extraction (strftime); cast to int for group_by
+    year_col = cast(func.strftime("%Y", BookModel.finished_date), Integer)
+    rows = (
+        db.query(
+            year_col.label("year"),
+            func.count(BookModel.id).label("book_count"),
+            func.coalesce(func.sum(BookModel.pages), 0).label("total_pages"),
+        )
+        .filter(BookModel.finished_date.isnot(None))
+        .group_by(year_col)
+        .all()
+    )
+    stats_by_year = {}
+    for r in rows:
+        try:
+            y = int(r.year) if r.year is not None else None
+            if y is not None:
+                stats_by_year[y] = {"book_count": r.book_count, "total_pages": int(r.total_pages or 0)}
+        except (TypeError, ValueError):
+            continue
+    min_year = min(stats_by_year.keys(), default=current_year)
+    min_year = min(min_year, current_year)
+    result = []
+    for y in range(current_year, min_year - 1, -1):
+        data = stats_by_year.get(y, {"book_count": 0, "total_pages": 0})
+        result.append(
+            BookYearStat(year=y, book_count=data["book_count"], total_pages=data["total_pages"])
+        )
+    return result
 
 
 @router.get("/", response_model=List[Book])

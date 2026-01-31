@@ -65,6 +65,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/books/stats"
+        element={
+          <PrivateRoute>
+            <Books initialTab="stats" />
+          </PrivateRoute>
+        }
+      />
+      <Route
         path="/books"
         element={
           <PrivateRoute>

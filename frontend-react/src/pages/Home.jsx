@@ -246,6 +246,17 @@ export default function Home() {
             <button
               style={{
                 ...styles.actionButton,
+                ...(hoveredCard === 'books-stats' ? styles.actionButtonHover : {}),
+              }}
+              onClick={() => navigate('/books/stats')}
+              onMouseEnter={() => setHoveredCard('books-stats')}
+              onMouseLeave={() => setHoveredCard(null)}
+            >
+              📊 Books Stats
+            </button>
+            <button
+              style={{
+                ...styles.actionButton,
                 ...(hoveredCard === 'add-music' ? styles.actionButtonHover : {}),
               }}
               onClick={() => navigate('/music')}

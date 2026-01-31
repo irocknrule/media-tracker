@@ -11,6 +11,7 @@ from backend.models import (
     WorkoutExercise as WorkoutExerciseModel,
     WorkoutRecord as WorkoutRecordModel,
     ExerciseRecord as ExerciseRecordModel,
+    SetRecord as SetRecordModel,
     HabitLog as HabitLogModel
 )
 from backend.schemas import (
@@ -27,6 +28,7 @@ from backend.schemas import (
     WorkoutRecordUpdate,
     WorkoutRecordWithExercises,
     ExerciseRecord,
+    SetRecord,
     ExerciseProgress,
     ExerciseProgressEntry,
     WorkoutAnalytics
@@ -374,13 +376,30 @@ def create_workout_record(record: WorkoutRecordCreate, db: Session = Depends(get
         if not exercise:
             raise HTTPException(status_code=404, detail=f"Exercise with ID {exercise_data.exercise_id} not found")
         
+        # Calculate sets, reps, and weight from set_records if provided
+        sets_count = None
+        avg_reps = None
+        avg_weight = None
+        
+        if exercise_data.set_records and len(exercise_data.set_records) > 0:
+            sets_count = len(exercise_data.set_records)
+            total_reps = sum(sr.reps for sr in exercise_data.set_records)
+            avg_reps = total_reps // sets_count if sets_count > 0 else None
+            weights = [sr.weight for sr in exercise_data.set_records if sr.weight]
+            avg_weight = sum(weights) / len(weights) if weights else None
+        else:
+            # Use legacy fields if set_records not provided
+            sets_count = exercise_data.sets
+            avg_reps = exercise_data.reps
+            avg_weight = exercise_data.weight
+        
         exercise_record = ExerciseRecordModel(
             workout_record_id=db_record.id,
             exercise_id=exercise_data.exercise_id,
             exercise_name=exercise.name,
-            sets=exercise_data.sets,
-            reps=exercise_data.reps,
-            weight=exercise_data.weight,
+            sets=sets_count,
+            reps=avg_reps,
+            weight=avg_weight,
             weight_unit=exercise_data.weight_unit,
             time_seconds=exercise_data.time_seconds,
             distance=exercise_data.distance,
@@ -388,6 +407,20 @@ def create_workout_record(record: WorkoutRecordCreate, db: Session = Depends(get
             notes=exercise_data.notes
         )
         db.add(exercise_record)
+        db.flush()  # Get the exercise_record ID
+        
+        # Create individual set records if provided
+        if exercise_data.set_records and len(exercise_data.set_records) > 0:
+            for set_idx, set_data in enumerate(exercise_data.set_records, start=1):
+                set_record = SetRecordModel(
+                    exercise_record_id=exercise_record.id,
+                    set_number=set_data.set_number if hasattr(set_data, 'set_number') and set_data.set_number else set_idx,
+                    reps=set_data.reps,
+                    weight=set_data.weight,
+                    weight_unit=set_data.weight_unit or exercise_data.weight_unit or "lbs",
+                    notes=set_data.notes
+                )
+                db.add(set_record)
     
     # Create/update habit log entry for this workout
     if record.duration_minutes:
@@ -570,10 +603,20 @@ def get_workout_analytics(
     total_exercises_logged = len(exercise_records)
     unique_exercises = len(set(r.exercise_id for r in exercise_records))
     
-    # Calculate total volume
+    # Calculate total volume (use set_records if available, otherwise fall back to legacy fields)
     total_volume = 0.0
     for record in exercise_records:
-        if record.sets and record.reps and record.weight:
+        # Check if set_records exist for more accurate volume calculation
+        set_records = db.query(SetRecordModel).filter(
+            SetRecordModel.exercise_record_id == record.id
+        ).all()
+        
+        if set_records:
+            # Calculate volume from individual sets
+            for sr in set_records:
+                total_volume += sr.reps * sr.weight
+        elif record.sets and record.reps and record.weight:
+            # Fall back to legacy calculation
             total_volume += record.sets * record.reps * record.weight
     
     # Most frequent exercises
@@ -630,13 +673,37 @@ def get_personal_records(db: Session = Depends(get_db)):
         if not records:
             continue
         
-        # Find PRs
-        max_weight = max((r.weight for r in records if r.weight), default=None)
-        max_reps = max((r.reps for r in records if r.reps), default=None)
-        max_volume = max(
-            (r.sets * r.reps * r.weight for r in records if r.sets and r.reps and r.weight),
-            default=None
-        )
+        # Find PRs (check set_records first for accuracy, then fall back to legacy fields)
+        max_weight = None
+        max_reps = None
+        max_volume = None
+        
+        # Check set_records for more accurate PRs
+        for record in records:
+            set_records = db.query(SetRecordModel).filter(
+                SetRecordModel.exercise_record_id == record.id
+            ).all()
+            
+            if set_records:
+                # Use set_records for PRs
+                for sr in set_records:
+                    if sr.weight and (max_weight is None or sr.weight > max_weight):
+                        max_weight = sr.weight
+                    if sr.reps and (max_reps is None or sr.reps > max_reps):
+                        max_reps = sr.reps
+                    volume = sr.reps * sr.weight
+                    if max_volume is None or volume > max_volume:
+                        max_volume = volume
+            else:
+                # Fall back to legacy fields
+                if record.weight and (max_weight is None or record.weight > max_weight):
+                    max_weight = record.weight
+                if record.reps and (max_reps is None or record.reps > max_reps):
+                    max_reps = record.reps
+                if record.sets and record.reps and record.weight:
+                    volume = record.sets * record.reps * record.weight
+                    if max_volume is None or volume > max_volume:
+                        max_volume = volume
         
         if max_weight or max_reps or max_volume:
             prs.append({
@@ -700,6 +767,33 @@ def _get_workout_record_with_exercises(record_id: int, db: Session) -> WorkoutRe
         ExerciseRecordModel.workout_record_id == record_id
     ).all()
     
+    # Build exercise records with set_records
+    exercise_list = []
+    for er in exercise_records:
+        # Get set records for this exercise record
+        set_records = db.query(SetRecordModel).filter(
+            SetRecordModel.exercise_record_id == er.id
+        ).order_by(SetRecordModel.set_number).all()
+        
+        # Create ExerciseRecord with set_records
+        exercise_dict = {
+            "id": er.id,
+            "workout_record_id": er.workout_record_id,
+            "exercise_id": er.exercise_id,
+            "exercise_name": er.exercise_name,
+            "sets": er.sets,
+            "reps": er.reps,
+            "weight": er.weight,
+            "weight_unit": er.weight_unit,
+            "time_seconds": er.time_seconds,
+            "distance": er.distance,
+            "distance_unit": er.distance_unit,
+            "notes": er.notes,
+            "created_at": er.created_at,
+            "set_records": [SetRecord.model_validate(sr) for sr in set_records] if set_records else []
+        }
+        exercise_list.append(ExerciseRecord(**exercise_dict))
+    
     return WorkoutRecordWithExercises(
         id=record.id,
         workout_id=record.workout_id,
@@ -708,6 +802,6 @@ def _get_workout_record_with_exercises(record_id: int, db: Session) -> WorkoutRe
         duration_minutes=record.duration_minutes,
         notes=record.notes,
         created_at=record.created_at,
-        exercises=[ExerciseRecord.model_validate(er) for er in exercise_records]
+        exercises=exercise_list
     )
 

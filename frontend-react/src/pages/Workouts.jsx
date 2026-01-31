@@ -370,16 +370,20 @@ function LogWorkoutTab({ exercises, workouts, savedState, onStateChange, onWorko
 
       // Pre-populate exercises
       if (details.exercises && details.exercises.length > 0) {
-        const records = details.exercises.map(ex => ({
-          exercise_id: ex.exercise_id,
-          exercise_name: ex.exercise_name,
-          sets: isCardioExercise(ex.exercise_name) ? null : 3,
-          reps: isCardioExercise(ex.exercise_name) ? null : 10,
-          weight: isCardioExercise(ex.exercise_name) ? null : 0,
-          time_seconds: isCardioExercise(ex.exercise_name) ? null : null,
-          distance: isCardioExercise(ex.exercise_name) ? null : null,
-          distance_unit: isCardioExercise(ex.exercise_name) ? 'mi' : null,
-        }));
+        const records = details.exercises.map(ex => {
+          const isCardio = isCardioExercise(ex.exercise_name);
+          return {
+            exercise_id: ex.exercise_id,
+            exercise_name: ex.exercise_name,
+            sets: isCardio ? null : 3,
+            reps: isCardio ? null : 10,
+            weight: isCardio ? null : 0,
+            time_seconds: isCardio ? null : null,
+            distance: isCardio ? null : null,
+            distance_unit: isCardio ? 'mi' : null,
+            set_records: isCardio ? [] : [{ set_number: 1, reps: 10, weight: 0, weight_unit: 'lbs' }],
+          };
+        });
         setExerciseRecords(records);
       }
 
@@ -408,6 +412,7 @@ function LogWorkoutTab({ exercises, workouts, savedState, onStateChange, onWorko
         time_seconds: null,
         distance: null,
         distance_unit: 'mi',
+        set_records: [], // Individual sets with reps and weight
       },
     ]);
   };
@@ -430,6 +435,7 @@ function LogWorkoutTab({ exercises, workouts, savedState, onStateChange, onWorko
           updated[index].sets = null;
           updated[index].reps = null;
           updated[index].weight = null;
+          updated[index].set_records = [];
           updated[index].time_seconds = null;
           updated[index].distance = null;
           updated[index].distance_unit = 'mi';
@@ -437,10 +443,52 @@ function LogWorkoutTab({ exercises, workouts, savedState, onStateChange, onWorko
           updated[index].time_seconds = null;
           updated[index].distance = null;
           updated[index].distance_unit = null;
+          // Initialize with one set if set_records is empty
+          if (!updated[index].set_records || updated[index].set_records.length === 0) {
+            updated[index].set_records = [{ set_number: 1, reps: 10, weight: 0, weight_unit: 'lbs' }];
+          }
         }
       }
     }
     
+    setExerciseRecords(updated);
+  };
+
+  const addSet = (exerciseIndex) => {
+    const updated = [...exerciseRecords];
+    const currentSets = updated[exerciseIndex].set_records || [];
+    const nextSetNumber = currentSets.length + 1;
+    const lastSet = currentSets[currentSets.length - 1];
+    
+    updated[exerciseIndex].set_records = [
+      ...currentSets,
+      {
+        set_number: nextSetNumber,
+        reps: lastSet?.reps || 10,
+        weight: lastSet?.weight || 0,
+        weight_unit: lastSet?.weight_unit || 'lbs',
+      },
+    ];
+    setExerciseRecords(updated);
+  };
+
+  const removeSet = (exerciseIndex, setIndex) => {
+    const updated = [...exerciseRecords];
+    updated[exerciseIndex].set_records = updated[exerciseIndex].set_records.filter((_, i) => i !== setIndex);
+    // Renumber sets
+    updated[exerciseIndex].set_records = updated[exerciseIndex].set_records.map((set, i) => ({
+      ...set,
+      set_number: i + 1,
+    }));
+    setExerciseRecords(updated);
+  };
+
+  const updateSet = (exerciseIndex, setIndex, field, value) => {
+    const updated = [...exerciseRecords];
+    updated[exerciseIndex].set_records[setIndex] = {
+      ...updated[exerciseIndex].set_records[setIndex],
+      [field]: value,
+    };
     setExerciseRecords(updated);
   };
 
@@ -466,17 +514,30 @@ function LogWorkoutTab({ exercises, workouts, savedState, onStateChange, onWorko
         workout_name: workout?.name || 'Custom Workout',
         workout_date: workoutDateTime.toISOString(),
         duration_minutes: duration,
-        exercises: recordsToSave.map(er => ({
-          exercise_id: er.exercise_id,
-          sets: er.sets || null,
-          reps: er.reps || null,
-          weight: er.weight || null,
-          weight_unit: 'lbs',
-          time_seconds: er.time_seconds || null,
-          distance: er.distance || null,
-          distance_unit: er.distance_unit || null,
-          notes: null,
-        })),
+        exercises: recordsToSave.map(er => {
+          const isCardio = isCardioExercise(er.exercise_name);
+          return {
+            exercise_id: er.exercise_id,
+            sets: er.sets || null,
+            reps: er.reps || null,
+            weight: er.weight || null,
+            weight_unit: 'lbs',
+            time_seconds: er.time_seconds || null,
+            distance: er.distance || null,
+            distance_unit: er.distance_unit || null,
+            notes: null,
+            // Include set_records if available and not cardio
+            set_records: (!isCardio && er.set_records && er.set_records.length > 0) 
+              ? er.set_records.map(sr => ({
+                  set_number: sr.set_number,
+                  reps: sr.reps,
+                  weight: sr.weight,
+                  weight_unit: sr.weight_unit || 'lbs',
+                  notes: sr.notes || null,
+                }))
+              : null,
+          };
+        }),
       };
 
       await workoutService.createWorkoutRecord(workoutData);
@@ -568,7 +629,16 @@ function LogWorkoutTab({ exercises, workouts, savedState, onStateChange, onWorko
                 {lastWorkout.exercises.map((ex, idx) => (
                   <div key={idx} style={styles.lastWorkoutItem}>
                     <strong>{ex.exercise_name}</strong>
-                    {ex.sets && ex.reps && ex.weight ? (
+                    {ex.set_records && ex.set_records.length > 0 ? (
+                      <span>
+                        {ex.set_records.map((set, idx) => (
+                          <span key={idx}>
+                            {idx > 0 && ', '}
+                            Set {set.set_number}: {set.reps} × {set.weight} lbs
+                          </span>
+                        ))}
+                      </span>
+                    ) : ex.sets && ex.reps && ex.weight ? (
                       <span>{ex.sets} × {ex.reps} @ {ex.weight} lbs</span>
                     ) : ex.time_seconds ? (
                       <span>{Math.floor(ex.time_seconds / 60)} min</span>
@@ -667,41 +737,62 @@ function LogWorkoutTab({ exercises, workouts, savedState, onStateChange, onWorko
                   </>
                 ) : (
                   <>
-                    <div style={styles.formGroup}>
-                      <label>Sets</label>
-                      <input
-                        type="number"
-                        value={record.sets || ''}
-                        onChange={(e) => updateExerciseRecord(index, 'sets', parseInt(e.target.value) || null)}
-                        min="1"
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.formGroup}>
-                      <label>Reps</label>
-                      <input
-                        type="number"
-                        value={record.reps || ''}
-                        onChange={(e) => updateExerciseRecord(index, 'reps', parseInt(e.target.value) || null)}
-                        min="1"
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.formGroup}>
-                      <label>Weight (lbs)</label>
-                      <input
-                        type="number"
-                        value={record.weight || ''}
-                        onChange={(e) => updateExerciseRecord(index, 'weight', parseFloat(e.target.value) || null)}
-                        min="0"
-                        step="2.5"
-                        style={styles.input}
-                      />
+                    <div style={{ ...styles.formGroup, flex: '1 1 100%' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                        <label style={{ fontWeight: '600' }}>Sets</label>
+                        <button
+                          type="button"
+                          onClick={() => addSet(index)}
+                          style={{ ...styles.addButton, padding: '0.25rem 0.5rem', fontSize: '0.85rem' }}
+                        >
+                          ➕ Add Set
+                        </button>
+                      </div>
+                      {(record.set_records && record.set_records.length > 0) ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          {record.set_records.map((set, setIndex) => (
+                            <div key={setIndex} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                              <span style={{ minWidth: '40px', fontWeight: '500' }}>Set {set.set_number}:</span>
+                              <input
+                                type="number"
+                                placeholder="Reps"
+                                value={set.reps || ''}
+                                onChange={(e) => updateSet(index, setIndex, 'reps', parseInt(e.target.value) || 0)}
+                                min="1"
+                                style={{ ...styles.input, flex: 1, maxWidth: '100px' }}
+                              />
+                              <span style={{ margin: '0 0.25rem' }}>×</span>
+                              <input
+                                type="number"
+                                placeholder="Weight"
+                                value={set.weight || ''}
+                                onChange={(e) => updateSet(index, setIndex, 'weight', parseFloat(e.target.value) || 0)}
+                                min="0"
+                                step="2.5"
+                                style={{ ...styles.input, flex: 1, maxWidth: '100px' }}
+                              />
+                              <span style={{ margin: '0 0.25rem' }}>lbs</span>
+                              <button
+                                type="button"
+                                onClick={() => removeSet(index, setIndex)}
+                                style={{ ...styles.removeButton, padding: '0.25rem 0.5rem', fontSize: '0.85rem' }}
+                                disabled={record.set_records.length === 1}
+                              >
+                                ❌
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ padding: '0.5rem', backgroundColor: '#f0f0f0', borderRadius: '4px', color: '#666' }}>
+                          No sets added. Click "Add Set" to start logging.
+                        </div>
+                      )}
                     </div>
                     <div style={styles.formGroup}>
                       <button
                         onClick={() => handleSave(index)}
-                        disabled={!record.exercise_id || saving}
+                        disabled={!record.exercise_id || saving || !record.set_records || record.set_records.length === 0}
                         style={styles.saveButton}
                       >
                         💾
@@ -791,6 +882,15 @@ function HistoryTab({ workoutRecords, exercises, loading, onLoadRecords, onExerc
         time_seconds: ex.time_seconds,
         distance: ex.distance,
         distance_unit: ex.distance_unit || 'mi',
+        set_records: ex.set_records && ex.set_records.length > 0 
+          ? ex.set_records.map(sr => ({
+              set_number: sr.set_number,
+              reps: sr.reps,
+              weight: sr.weight,
+              weight_unit: sr.weight_unit || 'lbs',
+              notes: sr.notes || null,
+            }))
+          : [],
       })) : [],
     });
     setEditingId(record.id);
@@ -821,10 +921,52 @@ function HistoryTab({ workoutRecords, exercises, loading, onLoadRecords, onExerc
           updated[index].time_seconds = null;
           updated[index].distance = null;
           updated[index].distance_unit = null;
+          // Initialize with one set if set_records is empty
+          if (!updated[index].set_records || updated[index].set_records.length === 0) {
+            updated[index].set_records = [{ set_number: 1, reps: 10, weight: 0, weight_unit: 'lbs' }];
+          }
         }
       }
     }
     
+    setEditFormData({ ...editFormData, exercises: updated });
+  };
+
+  const addSet = (exerciseIndex) => {
+    const updated = [...editFormData.exercises];
+    const currentSets = updated[exerciseIndex].set_records || [];
+    const nextSetNumber = currentSets.length + 1;
+    const lastSet = currentSets[currentSets.length - 1];
+    
+    updated[exerciseIndex].set_records = [
+      ...currentSets,
+      {
+        set_number: nextSetNumber,
+        reps: lastSet?.reps || 10,
+        weight: lastSet?.weight || 0,
+        weight_unit: lastSet?.weight_unit || 'lbs',
+      },
+    ];
+    setEditFormData({ ...editFormData, exercises: updated });
+  };
+
+  const removeSet = (exerciseIndex, setIndex) => {
+    const updated = [...editFormData.exercises];
+    updated[exerciseIndex].set_records = updated[exerciseIndex].set_records.filter((_, i) => i !== setIndex);
+    // Renumber sets
+    updated[exerciseIndex].set_records = updated[exerciseIndex].set_records.map((set, i) => ({
+      ...set,
+      set_number: i + 1,
+    }));
+    setEditFormData({ ...editFormData, exercises: updated });
+  };
+
+  const updateSet = (exerciseIndex, setIndex, field, value) => {
+    const updated = [...editFormData.exercises];
+    updated[exerciseIndex].set_records[setIndex] = {
+      ...updated[exerciseIndex].set_records[setIndex],
+      [field]: value,
+    };
     setEditFormData({ ...editFormData, exercises: updated });
   };
 
@@ -842,6 +984,7 @@ function HistoryTab({ workoutRecords, exercises, loading, onLoadRecords, onExerc
           time_seconds: null,
           distance: null,
           distance_unit: 'mi',
+          set_records: [],
         },
       ],
     });
@@ -876,17 +1019,30 @@ function HistoryTab({ workoutRecords, exercises, loading, onLoadRecords, onExerc
         notes: editFormData.notes || null,
         exercises: editFormData.exercises
           .filter(er => er.exercise_id)
-          .map(er => ({
-            exercise_id: er.exercise_id,
-            sets: er.sets || null,
-            reps: er.reps || null,
-            weight: er.weight || null,
-            weight_unit: 'lbs',
-            time_seconds: er.time_seconds || null,
-            distance: er.distance || null,
-            distance_unit: er.distance_unit || null,
-            notes: null,
-          })),
+          .map(er => {
+            const isCardio = isCardioExercise(er.exercise_name);
+            return {
+              exercise_id: er.exercise_id,
+              sets: er.sets || null,
+              reps: er.reps || null,
+              weight: er.weight || null,
+              weight_unit: 'lbs',
+              time_seconds: er.time_seconds || null,
+              distance: er.distance || null,
+              distance_unit: er.distance_unit || null,
+              notes: null,
+              // Include set_records if available and not cardio
+              set_records: (!isCardio && er.set_records && er.set_records.length > 0) 
+                ? er.set_records.map(sr => ({
+                    set_number: sr.set_number,
+                    reps: sr.reps,
+                    weight: sr.weight,
+                    weight_unit: sr.weight_unit || 'lbs',
+                    notes: sr.notes || null,
+                  }))
+                : null,
+            };
+          }),
       };
 
       await workoutService.createWorkoutRecord(workoutData);
@@ -1072,36 +1228,57 @@ function HistoryTab({ workoutRecords, exercises, loading, onLoadRecords, onExerc
                             </>
                           ) : (
                             <>
-                              <div style={styles.formGroup}>
-                                <label>Sets</label>
-                                <input
-                                  type="number"
-                                  value={exerciseRecord.sets || ''}
-                                  onChange={(e) => updateExerciseRecord(index, 'sets', parseInt(e.target.value) || null)}
-                                  min="1"
-                                  style={styles.input}
-                                />
-                              </div>
-                              <div style={styles.formGroup}>
-                                <label>Reps</label>
-                                <input
-                                  type="number"
-                                  value={exerciseRecord.reps || ''}
-                                  onChange={(e) => updateExerciseRecord(index, 'reps', parseInt(e.target.value) || null)}
-                                  min="1"
-                                  style={styles.input}
-                                />
-                              </div>
-                              <div style={styles.formGroup}>
-                                <label>Weight (lbs)</label>
-                                <input
-                                  type="number"
-                                  value={exerciseRecord.weight || ''}
-                                  onChange={(e) => updateExerciseRecord(index, 'weight', parseFloat(e.target.value) || null)}
-                                  min="0"
-                                  step="2.5"
-                                  style={styles.input}
-                                />
+                              <div style={{ ...styles.formGroup, flex: '1 1 100%' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                  <label style={{ fontWeight: '600' }}>Sets</label>
+                                  <button
+                                    type="button"
+                                    onClick={() => addSet(index)}
+                                    style={{ ...styles.addButton, padding: '0.25rem 0.5rem', fontSize: '0.85rem' }}
+                                  >
+                                    ➕ Add Set
+                                  </button>
+                                </div>
+                                {(exerciseRecord.set_records && exerciseRecord.set_records.length > 0) ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                    {exerciseRecord.set_records.map((set, setIndex) => (
+                                      <div key={setIndex} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                        <span style={{ minWidth: '40px', fontWeight: '500' }}>Set {set.set_number}:</span>
+                                        <input
+                                          type="number"
+                                          placeholder="Reps"
+                                          value={set.reps || ''}
+                                          onChange={(e) => updateSet(index, setIndex, 'reps', parseInt(e.target.value) || 0)}
+                                          min="1"
+                                          style={{ ...styles.input, flex: 1, maxWidth: '100px' }}
+                                        />
+                                        <span style={{ margin: '0 0.25rem' }}>×</span>
+                                        <input
+                                          type="number"
+                                          placeholder="Weight"
+                                          value={set.weight || ''}
+                                          onChange={(e) => updateSet(index, setIndex, 'weight', parseFloat(e.target.value) || 0)}
+                                          min="0"
+                                          step="2.5"
+                                          style={{ ...styles.input, flex: 1, maxWidth: '100px' }}
+                                        />
+                                        <span style={{ margin: '0 0.25rem' }}>lbs</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => removeSet(index, setIndex)}
+                                          style={{ ...styles.removeButton, padding: '0.25rem 0.5rem', fontSize: '0.85rem' }}
+                                          disabled={exerciseRecord.set_records.length === 1}
+                                        >
+                                          ❌
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div style={{ padding: '0.5rem', backgroundColor: '#f0f0f0', borderRadius: '4px', color: '#666' }}>
+                                    No sets added. Click "Add Set" to start logging.
+                                  </div>
+                                )}
                               </div>
                             </>
                           )}
@@ -1175,7 +1352,16 @@ function HistoryTab({ workoutRecords, exercises, loading, onLoadRecords, onExerc
                     >
                       <strong>{ex.exercise_name}</strong>
                     </button>
-                    {ex.sets && ex.reps && ex.weight ? (
+                    {ex.set_records && ex.set_records.length > 0 ? (
+                      <span>
+                        {ex.set_records.map((set, idx) => (
+                          <span key={idx}>
+                            {idx > 0 && ', '}
+                            Set {set.set_number}: {set.reps} × {set.weight} lbs
+                          </span>
+                        ))}
+                      </span>
+                    ) : ex.sets && ex.reps && ex.weight ? (
                       <span>{ex.sets} × {ex.reps} @ {ex.weight} lbs</span>
                     ) : ex.time_seconds ? (
                       <span>{Math.floor(ex.time_seconds / 60)} min</span>

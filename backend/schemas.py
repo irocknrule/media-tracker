@@ -167,6 +167,13 @@ class Book(BookBase):
         from_attributes = True
 
 
+class BookYearStat(BaseModel):
+    """Stats per year (by finished_date) for books."""
+    year: int
+    book_count: int
+    total_pages: int
+
+
 # Music schemas
 class MusicBase(BaseModel):
     title: str
@@ -514,17 +521,42 @@ class WorkoutWithExercises(Workout):
         from_attributes = True
 
 
+class SetRecordBase(BaseModel):
+    """Base schema for individual set record"""
+    set_number: int
+    reps: int
+    weight: float
+    weight_unit: Optional[str] = "lbs"
+    notes: Optional[str] = None
+
+
+class SetRecordCreate(SetRecordBase):
+    """Schema for creating a set record"""
+    pass
+
+
+class SetRecord(SetRecordBase):
+    """Schema for set record response"""
+    id: int
+    exercise_record_id: int
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
 class ExerciseRecordBase(BaseModel):
     """Base schema for exercise record"""
     exercise_id: int
-    sets: Optional[int] = None
-    reps: Optional[int] = None
-    weight: Optional[float] = None
+    sets: Optional[int] = None  # Kept for backward compatibility
+    reps: Optional[int] = None  # Kept for backward compatibility
+    weight: Optional[float] = None  # Kept for backward compatibility
     weight_unit: Optional[str] = "lbs"
     time_seconds: Optional[int] = None
     distance: Optional[float] = None
     distance_unit: Optional[str] = None
     notes: Optional[str] = None
+    set_records: Optional[List[SetRecordCreate]] = None  # Individual sets with reps and weight
 
 
 class ExerciseRecordCreate(ExerciseRecordBase):
@@ -538,6 +570,7 @@ class ExerciseRecord(ExerciseRecordBase):
     workout_record_id: int
     exercise_name: str
     created_at: datetime
+    set_records: Optional[List[SetRecord]] = []  # Individual sets
     
     class Config:
         from_attributes = True

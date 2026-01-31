@@ -1,6 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from typing import List
+
 from backend.routers import auth, movies, tv_shows, books, music, analytics, search, habits, portfolio, allocation, workouts
+from backend.database import get_db
+from backend.schemas import BookYearStat
 import warnings
 import logging
 
@@ -36,6 +41,12 @@ app.include_router(habits.router)
 app.include_router(portfolio.router)
 app.include_router(allocation.router)
 app.include_router(workouts.router)
+
+
+@app.get("/books-stats/summary", response_model=List[BookYearStat])
+def books_stats_summary(db: Session = Depends(get_db)):
+    """Books stats by year (unambiguous path to avoid shadowing by /books/{id})."""
+    return books.get_books_stats_summary(db)
 
 
 @app.get("/")

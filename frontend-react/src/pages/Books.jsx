@@ -5,14 +5,13 @@ import { bookService } from '../services/bookService';
 import { searchService } from '../services/searchService';
 import { getErrorMessage } from '../utils/errorHandler';
 
-export default function Books() {
+export default function Books({ initialTab }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [books, setBooks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [yearFilter, setYearFilter] = useState('');
-  const [activeTab, setActiveTab] = useState('view');
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingBook, setEditingBook] = useState(null);
   const [expandedBooks, setExpandedBooks] = useState(new Set());
@@ -23,6 +22,13 @@ export default function Books() {
   const [searchResults, setSearchResults] = useState([]);
   const [selectedBook, setSelectedBook] = useState(null);
   const [searching, setSearching] = useState(false);
+  const [statsData, setStatsData] = useState([]);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState('');
+  const [hideZeroYears, setHideZeroYears] = useState(false);
+  const [statsMetric, setStatsMetric] = useState('books');
+  const [showAboutStats, setShowAboutStats] = useState(false);
+  const [activeTab, setActiveTab] = useState(initialTab || 'view');
   const [formData, setFormData] = useState({
     title: '',
     author: '',
@@ -37,6 +43,27 @@ export default function Books() {
   useEffect(() => {
     loadBooks();
   }, [yearFilter, showWantToReadOnly, activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'stats') {
+      loadStats();
+    }
+  }, [activeTab]);
+
+  const loadStats = async () => {
+    try {
+      setStatsLoading(true);
+      setStatsError('');
+      const data = await bookService.getStatsSummary();
+      setStatsData(data || []);
+    } catch (err) {
+      console.error('Error loading books stats:', err);
+      setStatsError(getErrorMessage(err) || 'Failed to load stats');
+      setStatsData([]);
+    } finally {
+      setStatsLoading(false);
+    }
+  };
 
   const loadBooks = async () => {
     try {
@@ -267,6 +294,14 @@ export default function Books() {
           </button>
           <button
             onClick={() => {
+              setActiveTab('stats');
+            }}
+            style={activeTab === 'stats' ? styles.activeTabStats : styles.tab}
+          >
+            📊 Stats
+          </button>
+          <button
+            onClick={() => {
               setActiveTab('currently_reading');
               setShowAddForm(false);
               resetForm();
@@ -293,6 +328,7 @@ export default function Books() {
           </button>
         </div>
 
+        {activeTab !== 'stats' && (
         <div style={styles.controls}>
           <div style={styles.filterGroup}>
             <label htmlFor="yearFilter" style={styles.label}>
@@ -353,6 +389,140 @@ export default function Books() {
             )}
           </div>
         </div>
+        )}
+
+        {activeTab === 'stats' && (
+          <div style={styles.statsControls}>
+            <nav style={styles.statsBreadcrumb}>
+              <button type="button" onClick={() => setActiveTab('view')} style={styles.breadcrumbLink}>
+                Books
+              </button>
+              <span style={styles.breadcrumbSep}> &gt; </span>
+              <span style={styles.breadcrumbCurrent}>Stats</span>
+            </nav>
+            <div style={styles.statsOptions}>
+              <button
+                type="button"
+                onClick={() => setShowAboutStats(!showAboutStats)}
+                style={styles.aboutStatsLink}
+              >
+                about stats
+              </button>
+              <label style={styles.statsCheckbox}>
+                <input
+                  type="checkbox"
+                  checked={hideZeroYears}
+                  onChange={(e) => setHideZeroYears(e.target.checked)}
+                  style={styles.checkbox}
+                />
+                hide zero years
+              </label>
+              <div style={styles.statsRadios} role="radiogroup" aria-label="Stats metric">
+                {[
+                  { value: 'books', label: 'books' },
+                  { value: 'pages', label: 'pages' },
+                  { value: 'publication_year', label: 'publication year' },
+                  { value: 'books_over_time', label: 'books over time' },
+                  { value: 'pages_over_time', label: 'pages over time' },
+                ].map(({ value, label }) => (
+                  <label key={value} style={styles.radioLabel}>
+                    <input
+                      type="radio"
+                      name="statsMetric"
+                      checked={statsMetric === value}
+                      onChange={() => setStatsMetric(value)}
+                      style={styles.radioInput}
+                    />
+                    <span style={statsMetric === value || (value === 'publication_year' && statsMetric === 'books') ? styles.radioSpanActive : styles.radioSpan}>
+                      {label}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            {showAboutStats && (
+              <div style={styles.aboutStatsBox}>
+                Stats are based on the year you finished each book. “Books” shows how many you finished per year; “Pages” shows total pages read per year. Use “view books from [year]” to see the list for that year.
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'stats' && (
+          <>
+            {statsError && (
+              <div style={styles.error}>
+                {statsError}
+                {statsError.toLowerCase().includes('not found') && (
+                  <div style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>
+                    Restart the backend (uvicorn) so the stats route is loaded, then refresh this page.
+                  </div>
+                )}
+              </div>
+            )}
+            {statsLoading ? (
+              <div style={styles.loading}>Loading stats...</div>
+            ) : (() => {
+              const usePages = statsMetric === 'pages' || statsMetric === 'pages_over_time';
+              // publication_year uses same data as books (we use finished year, not publication)
+              const rows = statsData.map((row) => ({
+                year: row.year,
+                value: usePages ? row.total_pages : row.book_count,
+                book_count: row.book_count,
+                total_pages: row.total_pages,
+              }));
+              const filtered = hideZeroYears ? rows.filter((r) => r.value > 0) : rows;
+              const maxVal = Math.max(1, ...filtered.map((r) => r.value));
+              return (
+                <div style={styles.statsList}>
+                  {filtered.length === 0 ? (
+                    <div style={styles.empty}>No stats to show. Add books with a finished date to see stats by year.</div>
+                  ) : (
+                    filtered.map((row) => (
+                      <div key={row.year} style={styles.statsRow}>
+                        <span style={styles.statsYearLabel}>{row.year}</span>
+                        <span style={styles.statsValue}>{row.value}</span>
+                        <div style={styles.statsBarWrap}>
+                          <div
+                            style={{
+                              ...styles.statsBarFill,
+                              width: `${(row.value / maxVal) * 100}%`,
+                            }}
+                          >
+                            {row.value > 0 && <span style={styles.statsBarLabel}>{row.value}</span>}
+                          </div>
+                          <div style={styles.statsBarBg} />
+                        </div>
+                        <div style={styles.statsRowActions}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setYearFilter(String(row.year));
+                              setActiveTab('details');
+                            }}
+                            style={styles.statsDetailButton}
+                          >
+                            details
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setYearFilter(String(row.year));
+                              setActiveTab('view');
+                            }}
+                            style={styles.statsViewButton}
+                          >
+                            view books from {row.year}
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              );
+            })()}
+          </>
+        )}
 
         {error && (
           <div style={styles.error}>
@@ -600,7 +770,7 @@ export default function Books() {
           </div>
         )}
 
-        {loading ? (
+        {activeTab !== 'stats' && (loading ? (
           <div style={styles.loading}>Loading books...</div>
         ) : books.length === 0 ? (
           <div style={styles.empty}>
@@ -747,7 +917,7 @@ export default function Books() {
               </div>
             ))}
           </div>
-        )}
+        ))}
       </div>
     </div>
   );
@@ -815,6 +985,7 @@ const styles = {
   },
   tabContainer: {
     display: 'flex',
+    flexWrap: 'wrap',
     gap: '0.5rem',
     marginBottom: '2rem',
     borderBottom: '2px solid #dee2e6',
@@ -841,6 +1012,183 @@ const styles = {
     fontSize: '1rem',
     fontWeight: '600',
     marginBottom: '-2px',
+  },
+  activeTabStats: {
+    padding: '0.75rem 1.5rem',
+    backgroundColor: 'transparent',
+    color: '#2d5a27',
+    border: 'none',
+    borderBottom: '2px solid #2d5a27',
+    cursor: 'pointer',
+    fontSize: '1rem',
+    fontWeight: '600',
+    marginBottom: '-2px',
+  },
+  statsControls: {
+    marginBottom: '1.5rem',
+  },
+  statsBreadcrumb: {
+    marginBottom: '0.75rem',
+    fontSize: '0.95rem',
+  },
+  breadcrumbLink: {
+    background: 'none',
+    border: 'none',
+    color: '#2d5a27',
+    cursor: 'pointer',
+    padding: 0,
+    textDecoration: 'underline',
+    fontSize: 'inherit',
+  },
+  breadcrumbSep: {
+    color: '#333',
+  },
+  breadcrumbCurrent: {
+    color: '#333',
+  },
+  statsOptions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '1rem',
+    marginBottom: '0.5rem',
+  },
+  aboutStatsLink: {
+    background: 'none',
+    border: 'none',
+    color: '#666',
+    cursor: 'pointer',
+    padding: 0,
+    textDecoration: 'underline',
+    fontSize: '0.95rem',
+  },
+  statsCheckbox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    cursor: 'pointer',
+    fontSize: '0.95rem',
+    color: '#333',
+  },
+  statsRadios: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '0.5rem',
+    alignItems: 'center',
+  },
+  radioLabel: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    cursor: 'pointer',
+    margin: 0,
+  },
+  radioInput: {
+    marginRight: '0.35rem',
+  },
+  radioSpan: {
+    padding: '0.35rem 0.75rem',
+    borderRadius: '4px',
+    backgroundColor: '#e9ecef',
+    color: '#333',
+    fontSize: '0.9rem',
+  },
+  radioSpanActive: {
+    padding: '0.35rem 0.75rem',
+    borderRadius: '4px',
+    backgroundColor: '#2d5a27',
+    color: 'white',
+    fontSize: '0.9rem',
+  },
+  aboutStatsBox: {
+    padding: '1rem',
+    backgroundColor: '#f8f9fa',
+    borderRadius: '4px',
+    marginTop: '0.5rem',
+    fontSize: '0.9rem',
+    color: '#555',
+    maxWidth: '36rem',
+  },
+  statsList: {
+    marginTop: '1rem',
+  },
+  statsRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.75rem',
+    marginBottom: '0.5rem',
+    flexWrap: 'wrap',
+  },
+  statsYearLabel: {
+    minWidth: '2.5rem',
+    fontWeight: '500',
+    color: '#333',
+  },
+  statsValue: {
+    minWidth: '2rem',
+    color: '#333',
+    fontSize: '0.95rem',
+  },
+  statsBarWrap: {
+    flex: 1,
+    minWidth: '120px',
+    minHeight: '28px',
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'stretch',
+    borderRadius: '4px',
+    overflow: 'hidden',
+  },
+  statsBarBg: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#e9ecef',
+    borderRadius: '4px',
+    zIndex: 0,
+  },
+  statsBarFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    minWidth: '2px',
+    backgroundColor: '#e67e22',
+    borderRadius: '4px',
+    zIndex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    paddingLeft: '0.5rem',
+    boxSizing: 'border-box',
+  },
+  statsBarLabel: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: '0.85rem',
+  },
+  statsRowActions: {
+    display: 'flex',
+    gap: '0.5rem',
+    flexShrink: 0,
+  },
+  statsDetailButton: {
+    padding: '0.35rem 0.75rem',
+    backgroundColor: '#e9ecef',
+    color: '#333',
+    border: '1px solid #dee2e6',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '0.85rem',
+  },
+  statsViewButton: {
+    padding: '0.35rem 0.75rem',
+    backgroundColor: '#e9ecef',
+    color: '#333',
+    border: '1px solid #dee2e6',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '0.85rem',
   },
   controls: {
     display: 'flex',

@@ -24,4 +24,9 @@ export const bookService = {
   delete: async (id) => {
     await api.delete(`/books/${id}`);
   },
+
+  getStatsSummary: async () => {
+    const response = await api.get('/books-stats/summary');
+    return response.data;
+  },
 };
