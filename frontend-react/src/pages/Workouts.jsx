@@ -680,23 +680,23 @@ function LogWorkoutTab({ exercises, workouts, savedState, onStateChange, onWorko
                   </select>
                   {record.exercise_id && record.exercise_name && (
                     <div style={styles.exerciseLinkContainer}>
-                      <button
-                        onClick={(e) => {
-                          if (e.ctrlKey || e.metaKey) {
-                            // Open in new tab
-                            e.preventDefault();
-                            const url = `${window.location.origin}${window.location.pathname}?tab=exercises&exercise=${record.exercise_id}`;
-                            window.open(url, '_blank');
-                          } else if (onExerciseClick) {
-                            onExerciseClick(record.exercise_id);
-                          }
-                        }}
+                      <a
+                        href={`${window.location.origin}${window.location.pathname}?tab=exercises&exercise=${record.exercise_id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         style={styles.exerciseLink}
-                        type="button"
-                        title="Click to view details, Ctrl/Cmd+Click to open in new tab"
+                        title="Open exercise in new tab"
                       >
                         🔗 {record.exercise_name}
-                      </button>
+                      </a>
+                      {exercise?.image_url?.trim() && (
+                        <img
+                          src={exercise.image_url}
+                          alt={record.exercise_name}
+                          style={styles.exerciseThumbnail}
+                          onError={(e) => { e.target.style.display = 'none'; }}
+                        />
+                      )}
                     </div>
                   )}
                 </div>
@@ -1180,23 +1180,23 @@ function HistoryTab({ workoutRecords, exercises, loading, onLoadRecords, onExerc
                             </select>
                             {exerciseRecord.exercise_id && exerciseRecord.exercise_name && (
                               <div style={styles.exerciseLinkContainer}>
-                                <button
-                                  onClick={(e) => {
-                                    if (e.ctrlKey || e.metaKey) {
-                                      // Open in new tab
-                                      e.preventDefault();
-                                      const url = `${window.location.origin}${window.location.pathname}?tab=exercises&exercise=${exerciseRecord.exercise_id}`;
-                                      window.open(url, '_blank');
-                                    } else if (onExerciseClick) {
-                                      onExerciseClick(exerciseRecord.exercise_id);
-                                    }
-                                  }}
+                                <a
+                                  href={`${window.location.origin}${window.location.pathname}?tab=exercises&exercise=${exerciseRecord.exercise_id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
                                   style={styles.exerciseLink}
-                                  type="button"
-                                  title="Click to view details, Ctrl/Cmd+Click to open in new tab"
+                                  title="Open exercise in new tab"
                                 >
                                   🔗 {exerciseRecord.exercise_name}
-                                </button>
+                                </a>
+                                {exercise?.image_url?.trim() && (
+                                  <img
+                                    src={exercise.image_url}
+                                    alt={exerciseRecord.exercise_name}
+                                    style={styles.exerciseThumbnail}
+                                    onError={(e) => { e.target.style.display = 'none'; }}
+                                  />
+                                )}
                               </div>
                             )}
                           </div>
@@ -1333,25 +1333,27 @@ function HistoryTab({ workoutRecords, exercises, loading, onLoadRecords, onExerc
               )}
               <div style={styles.exercisesList}>
                 <strong>Exercises:</strong>
-                {record.exercises && record.exercises.map((ex, idx) => (
+                {record.exercises && record.exercises.map((ex, idx) => {
+                  const exDetail = exercises.find(e => e.id === ex.exercise_id);
+                  return (
                   <div key={idx} style={styles.exerciseItem}>
-                    <button
-                      onClick={(e) => {
-                        if (e.ctrlKey || e.metaKey) {
-                          // Open in new tab
-                          e.preventDefault();
-                          const url = `${window.location.origin}${window.location.pathname}?tab=exercises&exercise=${ex.exercise_id}`;
-                          window.open(url, '_blank');
-                        } else if (onExerciseClick) {
-                          onExerciseClick(ex.exercise_id);
-                        }
-                      }}
+                    <a
+                      href={`${window.location.origin}${window.location.pathname}?tab=exercises&exercise=${ex.exercise_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       style={styles.exerciseLink}
-                      type="button"
-                      title="Click to view details, Ctrl/Cmd+Click to open in new tab"
+                      title="Open exercise in new tab"
                     >
                       <strong>{ex.exercise_name}</strong>
-                    </button>
+                    </a>
+                    {exDetail?.image_url?.trim() && (
+                      <img
+                        src={exDetail.image_url}
+                        alt={ex.exercise_name}
+                        style={styles.exerciseThumbnail}
+                        onError={(e) => { e.target.style.display = 'none'; }}
+                      />
+                    )}
                     {ex.set_records && ex.set_records.length > 0 ? (
                       <span>
                         {ex.set_records.map((set, idx) => (
@@ -1367,7 +1369,8 @@ function HistoryTab({ workoutRecords, exercises, loading, onLoadRecords, onExerc
                       <span>{Math.floor(ex.time_seconds / 60)} min</span>
                     ) : null}
                   </div>
-                ))}
+                  );
+                })}
               </div>
               <div style={styles.actionButtons}>
                 <button
@@ -2421,6 +2424,14 @@ const styles = {
   },
   exerciseLinkContainer: {
     marginTop: '0.5rem',
+  },
+  exerciseThumbnail: {
+    display: 'block',
+    marginTop: '0.5rem',
+    maxWidth: '120px',
+    maxHeight: '120px',
+    borderRadius: '6px',
+    objectFit: 'cover',
   },
   exerciseLink: {
     padding: '0.25rem 0.5rem',

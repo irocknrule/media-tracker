@@ -451,9 +451,9 @@ class ExerciseUpdate(BaseModel):
 class Exercise(ExerciseBase):
     """Schema for exercise response"""
     id: int
-    created_at: datetime
-    updated_at: datetime
-    
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
     class Config:
         from_attributes = True
 
@@ -506,9 +506,9 @@ class WorkoutUpdate(BaseModel):
 class Workout(WorkoutBase):
     """Schema for workout response"""
     id: int
-    created_at: datetime
-    updated_at: datetime
-    
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
     class Config:
         from_attributes = True
 
