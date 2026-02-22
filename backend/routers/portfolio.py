@@ -11,8 +11,11 @@ from backend.schemas import (
     PortfolioTransactionCreate, 
     PortfolioTransactionUpdate,
     PortfolioTransactionBatchCreate,
+    PortfolioUploadResponse,
     TickerHolding,
-    PortfolioSummary
+    PortfolioSummary,
+    YearlyInvestment,
+    YearlyInvestmentTicker,
 )
 import requests
 
@@ -239,6 +242,51 @@ def calculate_ticker_holdings(transactions: List[PortfolioTransactionModel], app
         "average_cost": total_cost / total_quantity,
         "splits_applied": len(splits) if splits else 0
     }
+
+
+def calculate_remaining_lots_by_year(
+    transactions: List[PortfolioTransactionModel],
+    apply_splits: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    FIFO lot tracking with split-adjusted quantities. Returns remaining lots
+    as list of {year, quantity, cost_basis}. Used to attribute gain/loss to
+    the year of purchase.
+    """
+    if not transactions:
+        return []
+
+    ticker = transactions[0].ticker
+    earliest_date = min(txn.transaction_date for txn in transactions)
+    splits = get_stock_splits(ticker, since_date=earliest_date) if apply_splits else {}
+
+    # Lots: list of (year, quantity, cost_basis) — FIFO order
+    lots: List[tuple] = []
+
+    for txn in sorted(transactions, key=lambda t: t.transaction_date):
+        split_ratio = (
+            get_split_adjustment_ratio(txn.transaction_date, splits)
+            if splits else 1.0
+        )
+        adjusted_qty = txn.quantity * split_ratio
+        cost_basis = txn.total_amount + (txn.fees or 0.0)
+
+        if txn.transaction_type.upper() == "BUY":
+            lots.append((txn.transaction_date.year, adjusted_qty, cost_basis))
+        elif txn.transaction_type.upper() == "SELL":
+            remaining_to_sell = adjusted_qty
+            while remaining_to_sell > 0 and lots:
+                year, qty, basis = lots[0]
+                if qty <= remaining_to_sell:
+                    remaining_to_sell -= qty
+                    lots.pop(0)
+                else:
+                    # Partial lot: reduce first lot
+                    ratio = remaining_to_sell / qty
+                    lots[0] = (year, qty - remaining_to_sell, basis * (1 - ratio))
+                    remaining_to_sell = 0
+
+    return [{"year": y, "quantity": q, "cost_basis": b} for y, q, b in lots]
 
 
 def parse_schwab_json(data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -561,7 +609,7 @@ def create_transactions_batch(
     return created_transactions
 
 
-@router.post("/transactions/upload", response_model=List[PortfolioTransaction], status_code=status.HTTP_201_CREATED)
+@router.post("/transactions/upload", response_model=PortfolioUploadResponse, status_code=status.HTTP_201_CREATED)
 def upload_transactions_flexible(
     data: Dict[str, Any],
     db: Session = Depends(get_db)
@@ -571,6 +619,7 @@ def upload_transactions_flexible(
     Supports:
     1. Schwab brokerage format (BrokerageTransactions)
     2. Standard format (transactions)
+    Returns created_count and duplicates_count so the UI can report duplicates.
     """
     try:
         # Auto-detect and parse JSON format
@@ -583,6 +632,8 @@ def upload_transactions_flexible(
             )
         
         created_transactions = []
+        created_count = 0
+        duplicates_count = 0
         
         for transaction_data in parsed_transactions:
             # Normalize data
@@ -618,10 +669,12 @@ def upload_transactions_flexible(
             if existing_transaction:
                 # Skip duplicate, use existing transaction
                 created_transactions.append(existing_transaction)
+                duplicates_count += 1
             else:
                 db_transaction = PortfolioTransactionModel(**transaction_data)
                 db.add(db_transaction)
                 created_transactions.append(db_transaction)
+                created_count += 1
         
         try:
             db.commit()
@@ -631,6 +684,8 @@ def upload_transactions_flexible(
             if "uq_portfolio_transaction" in str(e) or "UNIQUE constraint" in str(e):
                 # Re-check for duplicates and only add non-duplicates
                 created_transactions = []
+                created_count = 0
+                duplicates_count = 0
                 for transaction_data in parsed_transactions:
                     transaction_data['ticker'] = transaction_data['ticker'].upper()
                     transaction_data['transaction_type'] = transaction_data['transaction_type'].upper()
@@ -647,10 +702,12 @@ def upload_transactions_flexible(
                     existing_transaction = check_duplicate_transaction(transaction_data, db)
                     if existing_transaction:
                         created_transactions.append(existing_transaction)
+                        duplicates_count += 1
                     else:
                         db_transaction = PortfolioTransactionModel(**transaction_data)
                         db.add(db_transaction)
                         created_transactions.append(db_transaction)
+                        created_count += 1
                 db.commit()
             else:
                 raise HTTPException(
@@ -662,7 +719,11 @@ def upload_transactions_flexible(
         for txn in created_transactions:
             db.refresh(txn)
         
-        return created_transactions
+        return PortfolioUploadResponse(
+            transactions=created_transactions,
+            created_count=created_count,
+            duplicates_count=duplicates_count
+        )
         
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -852,6 +913,129 @@ def get_portfolio_summary(
     )
     
     return summary
+
+
+@router.get("/yearly-investments", response_model=List[YearlyInvestment])
+def get_yearly_investments(
+    db: Session = Depends(get_db)
+):
+    """Get total cost basis invested per year and gain/loss on remaining holdings (FIFO + splits)."""
+    buy_transactions = (
+        db.query(PortfolioTransactionModel)
+        .filter(PortfolioTransactionModel.transaction_type == "BUY")
+        .order_by(PortfolioTransactionModel.transaction_date)
+        .all()
+    )
+
+    yearly_data = {}
+
+    for txn in buy_transactions:
+        year = txn.transaction_date.year
+        if year not in yearly_data:
+            yearly_data[year] = {
+                "total_invested": 0.0,
+                "total_fees": 0.0,
+                "transaction_count": 0,
+                "tickers": {},
+                "cost_basis_remaining": 0.0,
+                "current_value_remaining": 0.0,
+            }
+
+        yearly_data[year]["total_invested"] += txn.total_amount
+        yearly_data[year]["total_fees"] += txn.fees or 0.0
+        yearly_data[year]["transaction_count"] += 1
+
+        ticker = txn.ticker
+        if ticker not in yearly_data[year]["tickers"]:
+            yearly_data[year]["tickers"][ticker] = {
+                "ticker": ticker,
+                "asset_type": txn.asset_type,
+                "total_amount": 0.0,
+                "fees": 0.0,
+                "transaction_count": 0,
+                "cost_basis_remaining": None,
+                "current_value": None,
+                "gain_loss": None,
+            }
+
+        yearly_data[year]["tickers"][ticker]["total_amount"] += txn.total_amount
+        yearly_data[year]["tickers"][ticker]["fees"] += txn.fees or 0.0
+        yearly_data[year]["tickers"][ticker]["transaction_count"] += 1
+
+    # Remaining lots by year (FIFO + split-adjusted) and current value / gain per year
+    tickers = db.query(PortfolioTransactionModel.ticker).distinct().all()
+    tickers = [t[0] for t in tickers]
+
+    for ticker in tickers:
+        transactions = (
+            db.query(PortfolioTransactionModel)
+            .filter(PortfolioTransactionModel.ticker == ticker)
+            .order_by(PortfolioTransactionModel.transaction_date)
+            .all()
+        )
+        lots = calculate_remaining_lots_by_year(transactions, apply_splits=True)
+        current_price = get_current_stock_price(ticker)
+
+        for lot in lots:
+            y = lot["year"]
+            cost_basis = lot["cost_basis"]
+            qty = lot["quantity"]
+            current_value = (current_price * qty) if current_price is not None else None
+            gain_loss = (current_value - cost_basis) if current_value is not None else None
+
+            if y not in yearly_data:
+                continue
+            if ticker not in yearly_data[y]["tickers"]:
+                continue
+
+            yearly_data[y]["tickers"][ticker]["cost_basis_remaining"] = (
+                (yearly_data[y]["tickers"][ticker]["cost_basis_remaining"] or 0.0) + cost_basis
+            )
+            if current_value is not None:
+                yearly_data[y]["tickers"][ticker]["current_value"] = (
+                    (yearly_data[y]["tickers"][ticker]["current_value"] or 0.0) + current_value
+                )
+            if gain_loss is not None:
+                yearly_data[y]["tickers"][ticker]["gain_loss"] = (
+                    (yearly_data[y]["tickers"][ticker]["gain_loss"] or 0.0) + gain_loss
+                )
+
+            yearly_data[y]["cost_basis_remaining"] += cost_basis
+            if current_value is not None:
+                yearly_data[y]["current_value_remaining"] += current_value
+
+    result = []
+    for year in sorted(yearly_data.keys()):
+        data = yearly_data[year]
+        ticker_list = sorted(
+            data["tickers"].values(),
+            key=lambda t: t["total_amount"],
+            reverse=True,
+        )
+
+        cost_basis_rem = data["cost_basis_remaining"]
+        current_val_rem = data["current_value_remaining"]
+        has_remaining = cost_basis_rem > 0
+        gain_loss = (current_val_rem - cost_basis_rem) if (has_remaining and current_val_rem is not None) else None
+        gain_loss_pct = (
+            (gain_loss / cost_basis_rem * 100.0) if (gain_loss is not None and cost_basis_rem > 0) else None
+        )
+
+        result.append(
+            YearlyInvestment(
+                year=year,
+                total_invested=data["total_invested"],
+                total_fees=data["total_fees"],
+                transaction_count=data["transaction_count"],
+                tickers=[YearlyInvestmentTicker(**t) for t in ticker_list],
+                cost_basis_remaining=cost_basis_rem if has_remaining else None,
+                current_value_remaining=current_val_rem if has_remaining and current_val_rem is not None else None,
+                gain_loss=gain_loss,
+                gain_loss_percentage=gain_loss_pct,
+            )
+        )
+
+    return result
 
 
 @router.get("/tickers", response_model=List[str])

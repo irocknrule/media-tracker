@@ -106,4 +106,10 @@ export const portfolioService = {
     const response = await api.post(`/portfolio/allocation/ticker-categories/recategorize/${ticker}`);
     return response.data;
   },
+
+  // Yearly Investments
+  getYearlyInvestments: async () => {
+    const response = await api.get('/portfolio/yearly-investments');
+    return response.data;
+  },
 };

@@ -10,6 +10,7 @@ import Music from './pages/Music';
 import Habits from './pages/Habits';
 import Workouts from './pages/Workouts';
 import Portfolio from './pages/Portfolio';
+import Fire from './pages/Fire';
 
 function PrivateRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -109,6 +110,14 @@ function AppRoutes() {
         element={
           <PrivateRoute>
             <Portfolio />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/fire"
+        element={
+          <PrivateRoute>
+            <Fire />
           </PrivateRoute>
         }
       />

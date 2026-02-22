@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { portfolioService } from '../services/portfolioService';
@@ -6,6 +6,8 @@ import { getErrorMessage } from '../utils/errorHandler';
 import {
   AreaChart,
   Area,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -78,6 +80,12 @@ export default function Portfolio() {
   const [tickerCategories, setTickerCategories] = useState([]);
   const [allocationTab, setAllocationTab] = useState('summary'); // 'summary', 'settings', 'categories'
 
+  // Yearly investments state
+  const [yearlyInvestments, setYearlyInvestments] = useState([]);
+  const [expandedYear, setExpandedYear] = useState(null);
+  const [tickerSortKey, setTickerSortKey] = useState('total_amount');
+  const [tickerSortDir, setTickerSortDir] = useState('desc');
+
   useEffect(() => {
     if (activeTab === 'overview') {
       loadSummary();
@@ -90,6 +98,8 @@ export default function Portfolio() {
       loadTickers();
     } else if (activeTab === 'allocation') {
       loadAllocationData();
+    } else if (activeTab === 'yearly') {
+      loadYearlyInvestments();
     }
   }, [activeTab]);
 
@@ -206,6 +216,20 @@ export default function Portfolio() {
       if (err.response?.status !== 404) {
         setError(getErrorMessage(err) || 'Failed to load allocation data');
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadYearlyInvestments = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      const data = await portfolioService.getYearlyInvestments();
+      setYearlyInvestments(data || []);
+    } catch (err) {
+      console.error('Error loading yearly investments:', err);
+      setError(getErrorMessage(err) || 'Failed to load yearly investments');
     } finally {
       setLoading(false);
     }
@@ -396,14 +420,15 @@ export default function Portfolio() {
       
       const result = await portfolioService.uploadTransactions(data);
       
-      // Handle both old format (list) and new format (object)
-      const created = Array.isArray(result) ? result : (result.created || []);
-      const duplicates = Array.isArray(result) ? [] : (result.duplicates || []);
+      // API returns { transactions, created_count, duplicates_count }
+      const createdCount = typeof result?.created_count === 'number' ? result.created_count : (Array.isArray(result) ? result.length : (result.created || []).length);
+      const duplicatesCount = typeof result?.duplicates_count === 'number' ? result.duplicates_count : (Array.isArray(result) ? 0 : (result.duplicates || []).length);
+      const total = (result?.transactions?.length ?? (Array.isArray(result) ? result.length : 0)) || (createdCount + duplicatesCount);
       
       setUploadResult({
-        created: created.length,
-        duplicates: duplicates.length,
-        total: created.length + duplicates.length,
+        created: createdCount,
+        duplicates: duplicatesCount,
+        total: total || createdCount + duplicatesCount,
         details: result,
       });
       
@@ -438,14 +463,15 @@ export default function Portfolio() {
       
       const result = await portfolioService.uploadTransactions(data);
       
-      // Handle both old format (list) and new format (object)
-      const created = Array.isArray(result) ? result : (result.created || []);
-      const duplicates = Array.isArray(result) ? [] : (result.duplicates || []);
+      // API returns { transactions, created_count, duplicates_count }
+      const createdCount = typeof result?.created_count === 'number' ? result.created_count : (Array.isArray(result) ? result.length : (result.created || []).length);
+      const duplicatesCount = typeof result?.duplicates_count === 'number' ? result.duplicates_count : (Array.isArray(result) ? 0 : (result.duplicates || []).length);
+      const total = (result?.transactions?.length ?? (Array.isArray(result) ? result.length : 0)) || (createdCount + duplicatesCount);
       
       setUploadResult({
-        created: created.length,
-        duplicates: duplicates.length,
-        total: created.length + duplicates.length,
+        created: createdCount,
+        duplicates: duplicatesCount,
+        total: total || createdCount + duplicatesCount,
         details: result,
       });
       
@@ -763,6 +789,15 @@ export default function Portfolio() {
             onClick={() => setActiveTab('holdings')}
           >
             Individual Holdings
+          </button>
+          <button
+            style={{
+              ...styles.tab,
+              ...(activeTab === 'yearly' ? styles.tabActive : {}),
+            }}
+            onClick={() => setActiveTab('yearly')}
+          >
+            Yearly Investments
           </button>
         </div>
 
@@ -1600,6 +1635,300 @@ export default function Portfolio() {
                   <code>python scripts/migrate_add_asset_allocation.py</code>
                 </p>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Yearly Investments Tab */}
+        {activeTab === 'yearly' && (
+          <div style={styles.tabContent}>
+            <h2 style={styles.sectionTitle}>📅 Yearly Investment Summary</h2>
+            <p style={styles.info}>
+              Total cost basis of all BUY transactions per year across all tickers.
+              Gain/loss is computed on the portion of that year&apos;s purchases still held (FIFO, split-adjusted).
+            </p>
+
+            {yearlyInvestments.length > 0 ? (
+              <>
+                {/* Summary metrics */}
+                <div style={styles.metricsGrid}>
+                  <div style={styles.metricCard}>
+                    <div style={styles.metricLabel}>All-Time Invested</div>
+                    <div style={styles.metricValue}>
+                      {formatCurrency(yearlyInvestments.reduce((sum, y) => sum + y.total_invested, 0))}
+                    </div>
+                  </div>
+                  <div style={styles.metricCard}>
+                    <div style={styles.metricLabel}>Years Active</div>
+                    <div style={styles.metricValue}>{yearlyInvestments.length}</div>
+                  </div>
+                  <div style={styles.metricCard}>
+                    <div style={styles.metricLabel}>Avg / Year</div>
+                    <div style={styles.metricValue}>
+                      {formatCurrency(
+                        yearlyInvestments.reduce((sum, y) => sum + y.total_invested, 0) /
+                          yearlyInvestments.length
+                      )}
+                    </div>
+                  </div>
+                  <div style={styles.metricCard}>
+                    <div style={styles.metricLabel}>Total Transactions</div>
+                    <div style={styles.metricValue}>
+                      {yearlyInvestments.reduce((sum, y) => sum + y.transaction_count, 0)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bar chart */}
+                <div style={styles.section}>
+                  <h3 style={styles.subsectionTitle}>Investment by Year</h3>
+                  <div style={{ marginTop: '1rem' }}>
+                    <ResponsiveContainer width="100%" height={400}>
+                      <BarChart
+                        data={yearlyInvestments.map((y) => ({
+                          year: y.year.toString(),
+                          invested: y.total_invested,
+                          fees: y.total_fees,
+                        }))}
+                        margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(128, 128, 128, 0.2)" />
+                        <XAxis dataKey="year" stroke="#666" tick={{ fill: '#666', fontSize: 13 }} />
+                        <YAxis
+                          stroke="#666"
+                          tick={{ fill: '#666', fontSize: 12 }}
+                          tickFormatter={(v) =>
+                            `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v.toFixed(0)}`
+                          }
+                        />
+                        <Tooltip
+                          formatter={(value) => [formatCurrency(value)]}
+                          labelFormatter={(label) => `Year: ${label}`}
+                          contentStyle={{
+                            backgroundColor: 'rgba(255,255,255,0.95)',
+                            border: '1px solid #ccc',
+                            borderRadius: '4px',
+                          }}
+                        />
+                        <Bar
+                          dataKey="invested"
+                          name="Total Invested"
+                          fill="#007bff"
+                          radius={[4, 4, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Year-by-year table */}
+                <div style={styles.section}>
+                  <h3 style={styles.subsectionTitle}>Breakdown by Year</h3>
+                  <div style={styles.tableContainer}>
+                    <table style={styles.table}>
+                      <thead>
+                        <tr>
+                          <th style={styles.th}>Year</th>
+                          <th style={styles.th}>Total Invested</th>
+                          <th style={styles.th}>Cost Basis Held</th>
+                          <th style={styles.th}>Current Value</th>
+                          <th style={styles.th}>Gain/Loss</th>
+                          <th style={styles.th}>Txns</th>
+                          <th style={styles.th}>Tickers</th>
+                          <th style={styles.th}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...yearlyInvestments].reverse().map((yearData) => (
+                          <React.Fragment key={yearData.year}>
+                            <tr
+                              style={{ ...styles.tr, cursor: 'pointer' }}
+                              onClick={() => {
+                                setExpandedYear(expandedYear === yearData.year ? null : yearData.year);
+                                setTickerSortKey('total_amount');
+                                setTickerSortDir('desc');
+                              }}
+                            >
+                              <td style={{ ...styles.td, fontWeight: 'bold' }}>{yearData.year}</td>
+                              <td style={styles.td}>{formatCurrency(yearData.total_invested)}</td>
+                              <td style={styles.td}>
+                                {yearData.cost_basis_remaining != null
+                                  ? formatCurrency(yearData.cost_basis_remaining)
+                                  : '—'}
+                              </td>
+                              <td style={styles.td}>
+                                {yearData.current_value_remaining != null
+                                  ? formatCurrency(yearData.current_value_remaining)
+                                  : '—'}
+                              </td>
+                              <td
+                                style={{
+                                  ...styles.td,
+                                  color:
+                                    yearData.gain_loss != null
+                                      ? yearData.gain_loss >= 0
+                                        ? '#00cc88'
+                                        : '#ff4444'
+                                      : undefined,
+                                }}
+                              >
+                                {yearData.gain_loss != null ? (
+                                  <>
+                                    {formatCurrency(yearData.gain_loss)}
+                                    {yearData.gain_loss_percentage != null &&
+                                      ` (${yearData.gain_loss_percentage >= 0 ? '+' : ''}${yearData.gain_loss_percentage.toFixed(1)}%)`}
+                                  </>
+                                ) : (
+                                  '—'
+                                )}
+                              </td>
+                              <td style={styles.td}>{yearData.transaction_count}</td>
+                              <td style={styles.td}>{yearData.tickers.length}</td>
+                              <td style={styles.td}>
+                                {expandedYear === yearData.year ? '▼' : '▶'}
+                              </td>
+                            </tr>
+                            {expandedYear === yearData.year && (
+                              <tr>
+                                <td colSpan={8} style={{ padding: 0 }}>
+                                  <div style={yearlyStyles.tickerBreakdown}>
+                                    <table style={{ ...styles.table, marginBottom: 0 }}>
+                                      <thead>
+                                        <tr>
+                                          {[
+                                            { key: 'ticker', label: 'Ticker' },
+                                            { key: 'asset_type', label: 'Type' },
+                                            { key: 'total_amount', label: 'Invested' },
+                                            { key: 'cost_basis_remaining', label: 'Cost Basis Held' },
+                                            { key: 'current_value', label: 'Current Value' },
+                                            { key: 'gain_loss', label: 'Gain/Loss' },
+                                            { key: 'gain_loss_pct', label: 'G/L %' },
+                                            { key: 'transaction_count', label: 'Txns' },
+                                          ].map((col) => (
+                                            <th
+                                              key={col.key}
+                                              style={{
+                                                ...yearlyStyles.subTh,
+                                                cursor: 'pointer',
+                                                userSelect: 'none',
+                                              }}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (tickerSortKey === col.key) {
+                                                  setTickerSortDir(tickerSortDir === 'asc' ? 'desc' : 'asc');
+                                                } else {
+                                                  setTickerSortKey(col.key);
+                                                  setTickerSortDir(
+                                                    col.key === 'ticker' || col.key === 'asset_type' ? 'asc' : 'desc'
+                                                  );
+                                                }
+                                              }}
+                                            >
+                                              {col.label}
+                                              {tickerSortKey === col.key && (
+                                                <span style={{ marginLeft: '4px', fontSize: '0.7rem' }}>
+                                                  {tickerSortDir === 'asc' ? '▲' : '▼'}
+                                                </span>
+                                              )}
+                                            </th>
+                                          ))}
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {[...yearData.tickers]
+                                          .map((t) => ({
+                                            ...t,
+                                            gain_loss_pct:
+                                              t.gain_loss != null && t.cost_basis_remaining > 0
+                                                ? (t.gain_loss / t.cost_basis_remaining) * 100
+                                                : null,
+                                          }))
+                                          .sort((a, b) => {
+                                            const va = a[tickerSortKey] ?? -Infinity;
+                                            const vb = b[tickerSortKey] ?? -Infinity;
+                                            if (typeof va === 'string') {
+                                              return tickerSortDir === 'asc'
+                                                ? va.localeCompare(vb)
+                                                : vb.localeCompare(va);
+                                            }
+                                            return tickerSortDir === 'asc' ? va - vb : vb - va;
+                                          })
+                                          .map((t) => (
+                                          <tr key={t.ticker}>
+                                            <td style={yearlyStyles.subTd}>
+                                              <button
+                                                style={styles.tickerButton}
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setSelectedTicker(t.ticker);
+                                                  setActiveTab('holdings');
+                                                }}
+                                              >
+                                                {t.ticker}
+                                              </button>
+                                            </td>
+                                            <td style={yearlyStyles.subTd}>{t.asset_type}</td>
+                                            <td style={yearlyStyles.subTd}>
+                                              {formatCurrency(t.total_amount)}
+                                            </td>
+                                            <td style={yearlyStyles.subTd}>
+                                              {t.cost_basis_remaining != null
+                                                ? formatCurrency(t.cost_basis_remaining)
+                                                : '—'}
+                                            </td>
+                                            <td style={yearlyStyles.subTd}>
+                                              {t.current_value != null
+                                                ? formatCurrency(t.current_value)
+                                                : '—'}
+                                            </td>
+                                            <td
+                                              style={{
+                                                ...yearlyStyles.subTd,
+                                                color:
+                                                  t.gain_loss != null
+                                                    ? t.gain_loss >= 0
+                                                      ? '#00cc88'
+                                                      : '#ff4444'
+                                                    : undefined,
+                                              }}
+                                            >
+                                              {t.gain_loss != null
+                                                ? formatCurrency(t.gain_loss)
+                                                : '—'}
+                                            </td>
+                                            <td
+                                              style={{
+                                                ...yearlyStyles.subTd,
+                                                color:
+                                                  t.gain_loss_pct != null
+                                                    ? t.gain_loss_pct >= 0
+                                                      ? '#00cc88'
+                                                      : '#ff4444'
+                                                    : undefined,
+                                              }}
+                                            >
+                                              {t.gain_loss_pct != null
+                                                ? `${t.gain_loss_pct >= 0 ? '+' : ''}${t.gain_loss_pct.toFixed(1)}%`
+                                                : '—'}
+                                            </td>
+                                            <td style={yearlyStyles.subTd}>{t.transaction_count}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p style={styles.info}>No buy transactions found. Add transactions to see yearly investment data.</p>
             )}
           </div>
         )}
@@ -2563,5 +2892,26 @@ const chartStyles = {
     color: '#0c5460',
     padding: '1rem',
     borderRadius: '8px',
+  },
+};
+
+const yearlyStyles = {
+  tickerBreakdown: {
+    backgroundColor: '#f0f4f8',
+    padding: '0.75rem 1rem',
+    borderTop: '1px solid #ddd',
+  },
+  subTh: {
+    padding: '0.5rem 0.75rem',
+    textAlign: 'left',
+    borderBottom: '1px solid #ccc',
+    fontWeight: '600',
+    color: '#555',
+    fontSize: '0.85rem',
+  },
+  subTd: {
+    padding: '0.5rem 0.75rem',
+    borderBottom: '1px solid #e8e8e8',
+    fontSize: '0.9rem',
   },
 };

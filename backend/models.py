@@ -149,6 +149,49 @@ class TickerCategory(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+# FIRE Journey Tracker Models
+
+class InvestmentAccount(Base):
+    __tablename__ = "investment_accounts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    account_type = Column(String, nullable=False, index=True)  # "401K", "IRA", "ROTH_IRA", "HSA", "BROKERAGE", "STOCK_PLAN", "OTHER"
+    owner = Column(String, nullable=False, index=True)
+    institution = Column(String)
+    last_four = Column(String)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    snapshots = relationship("AccountSnapshot", back_populates="account", cascade="all, delete-orphan", order_by="AccountSnapshot.snapshot_date.desc()")
+
+
+class AccountSnapshot(Base):
+    __tablename__ = "account_snapshots"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("investment_accounts.id"), nullable=False, index=True)
+    snapshot_date = Column(Date, nullable=False, index=True)
+    balance = Column(Float, nullable=False)
+    contributions_since_last = Column(Float, default=0.0)
+    notes = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    account = relationship("InvestmentAccount", back_populates="snapshots")
+
+
+class PortfolioAggregateSnapshot(Base):
+    __tablename__ = "portfolio_aggregate_snapshots"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    snapshot_date = Column(Date, nullable=False, unique=True, index=True)
+    total_value = Column(Float, nullable=False)
+    contributions_since_last = Column(Float, default=0.0)
+    notes = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 # Workout Tracking Models
 
 class Exercise(Base):

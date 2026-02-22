@@ -203,6 +203,22 @@ export default function Home() {
                 Track investments, view holdings, manage transactions, and monitor asset allocation
               </p>
             </div>
+
+            <div
+              style={{
+                ...styles.navCard,
+                ...(hoveredCard === 'fire' ? styles.navCardHover : {}),
+              }}
+              onClick={() => navigate('/fire')}
+              onMouseEnter={() => setHoveredCard('fire')}
+              onMouseLeave={() => setHoveredCard(null)}
+            >
+              <div style={styles.navIcon}>🔥</div>
+              <h3 style={styles.navTitle}>FIRE Journey</h3>
+              <p style={styles.navDescription}>
+                Track investment accounts, monitor growth, and project your path to financial independence
+              </p>
+            </div>
           </div>
         </div>
 

@@ -322,6 +322,13 @@ class PortfolioTransactionBatchCreate(BaseModel):
     transactions: List[PortfolioTransactionCreate]
 
 
+class PortfolioUploadResponse(BaseModel):
+    """Response for transaction upload with created vs duplicate counts"""
+    transactions: List[PortfolioTransaction]
+    created_count: int
+    duplicates_count: int
+
+
 class TickerHolding(BaseModel):
     """Current holding information for a ticker"""
     ticker: str
@@ -343,6 +350,31 @@ class PortfolioSummary(BaseModel):
     total_profit_loss_percentage: Optional[float] = None
     holdings: List[TickerHolding]
     last_updated: Optional[datetime] = None
+
+
+class YearlyInvestmentTicker(BaseModel):
+    """Per-ticker breakdown within a yearly investment"""
+    ticker: str
+    asset_type: str
+    total_amount: float
+    fees: float
+    transaction_count: int
+    cost_basis_remaining: Optional[float] = None  # Cost basis from this year still held (FIFO + splits)
+    current_value: Optional[float] = None  # Current value of those shares
+    gain_loss: Optional[float] = None  # current_value - cost_basis_remaining
+
+
+class YearlyInvestment(BaseModel):
+    """Total cost basis invested into the brokerage account for a given year"""
+    year: int
+    total_invested: float
+    total_fees: float
+    transaction_count: int
+    tickers: List[YearlyInvestmentTicker] = []
+    cost_basis_remaining: Optional[float] = None  # Cost basis from this year still held
+    current_value_remaining: Optional[float] = None  # Current value of those shares
+    gain_loss: Optional[float] = None  # current_value_remaining - cost_basis_remaining
+    gain_loss_percentage: Optional[float] = None  # (gain_loss / cost_basis_remaining) * 100 when > 0
 
 
 # Asset Allocation schemas
@@ -421,6 +453,153 @@ class AssetAllocationSummary(BaseModel):
     total_portfolio_value: float
     categories: List[AllocationCategorySummary]
     last_updated: Optional[datetime] = None
+
+
+# FIRE Journey Tracker schemas
+
+class InvestmentAccountBase(BaseModel):
+    name: str
+    account_type: str  # "401K", "IRA", "ROTH_IRA", "HSA", "BROKERAGE", "STOCK_PLAN", "OTHER"
+    owner: str
+    institution: Optional[str] = None
+    last_four: Optional[str] = None
+    is_active: bool = True
+
+
+class InvestmentAccountCreate(InvestmentAccountBase):
+    balance: Optional[float] = None
+    snapshot_date: Optional[date] = None
+
+
+class InvestmentAccountUpdate(BaseModel):
+    name: Optional[str] = None
+    account_type: Optional[str] = None
+    owner: Optional[str] = None
+    institution: Optional[str] = None
+    last_four: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class InvestmentAccount(InvestmentAccountBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    latest_balance: Optional[float] = None
+    latest_snapshot_date: Optional[date] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class AccountSnapshotBase(BaseModel):
+    snapshot_date: date
+    balance: float
+    contributions_since_last: Optional[float] = 0.0
+    notes: Optional[str] = None
+
+
+class AccountSnapshotCreate(AccountSnapshotBase):
+    account_id: int
+
+
+class AccountSnapshotUpdate(BaseModel):
+    balance: Optional[float] = None
+    contributions_since_last: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class AccountSnapshot(AccountSnapshotBase):
+    id: int
+    account_id: int
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class BulkSnapshotEntry(BaseModel):
+    account_id: int
+    balance: float
+    contributions_since_last: Optional[float] = 0.0
+
+
+class BulkSnapshotCreate(BaseModel):
+    snapshot_date: date
+    entries: List[BulkSnapshotEntry]
+
+
+class BulkAccountImport(BaseModel):
+    text: str
+    snapshot_date: Optional[date] = None
+
+
+class BulkAccountImportResult(BaseModel):
+    accounts_created: int
+    accounts_updated: int
+    snapshots_created: int
+    accounts: List[InvestmentAccount]
+
+
+class OwnerSummary(BaseModel):
+    owner: str
+    total_value: float
+    account_count: int
+
+
+class AccountTypeSummary(BaseModel):
+    account_type: str
+    total_value: float
+    account_count: int
+
+
+class FireDashboard(BaseModel):
+    total_portfolio_value: float
+    by_owner: List[OwnerSummary]
+    by_account_type: List[AccountTypeSummary]
+    total_investment_income: Optional[float] = None
+    month_over_month_change: Optional[float] = None
+    month_over_month_change_pct: Optional[float] = None
+
+
+class IncomeHistoryEntry(BaseModel):
+    period_start: date
+    period_end: date
+    starting_balance: float
+    ending_balance: float
+    contributions: float
+    investment_income: float
+    growth_rate_pct: float
+
+
+class IncomeHistory(BaseModel):
+    entries: List[IncomeHistoryEntry]
+    total_investment_income: float
+    total_contributions: float
+
+
+class PortfolioAggregateSnapshotBase(BaseModel):
+    snapshot_date: date
+    total_value: float
+    contributions_since_last: Optional[float] = 0.0
+    notes: Optional[str] = None
+
+
+class PortfolioAggregateSnapshotCreate(PortfolioAggregateSnapshotBase):
+    pass
+
+
+class PortfolioAggregateSnapshotUpdate(BaseModel):
+    total_value: Optional[float] = None
+    contributions_since_last: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class PortfolioAggregateSnapshot(PortfolioAggregateSnapshotBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # Workout Tracking schemas

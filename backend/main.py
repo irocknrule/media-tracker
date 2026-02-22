@@ -3,8 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
 
-from backend.routers import auth, movies, tv_shows, books, music, analytics, search, habits, portfolio, allocation, workouts
-from backend.database import get_db
+from backend.routers import auth, movies, tv_shows, books, music, analytics, search, habits, portfolio, allocation, workouts, fire
+from backend.database import get_db, engine
+from backend.models import Base
 from backend.schemas import BookYearStat
 import warnings
 import logging
@@ -19,6 +20,10 @@ app = FastAPI(
     description="A secure local media tracking application API",
     version="1.0.0"
 )
+
+@app.on_event("startup")
+def on_startup():
+    Base.metadata.create_all(bind=engine)
 
 # CORS middleware for Streamlit frontend
 app.add_middleware(
@@ -41,6 +46,7 @@ app.include_router(habits.router)
 app.include_router(portfolio.router)
 app.include_router(allocation.router)
 app.include_router(workouts.router)
+app.include_router(fire.router)
 
 
 @app.get("/books-stats/summary", response_model=List[BookYearStat])
