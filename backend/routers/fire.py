@@ -423,8 +423,9 @@ def _build_timeline(db: Session, account_ids: list[int] | None = None) -> list[d
     """
     Build a unified timeline of (date, total_value, contributions) from both
     per-account snapshots and aggregate portfolio snapshots.
-    When account_ids is provided, only those accounts' snapshots are used and
-    aggregate snapshots are excluded (they represent the full portfolio).
+    When account_ids is provided, aggregate snapshots are scaled by the ratio
+    of the selected accounts' value to the full per-account total, preserving
+    the historical timeline while approximating the filtered view.
     """
     acct_query = db.query(
         AccountSnapshot.snapshot_date,
@@ -436,12 +437,44 @@ def _build_timeline(db: Session, account_ids: list[int] | None = None) -> list[d
     acct_rows = acct_query.group_by(AccountSnapshot.snapshot_date).all()
     acct_map = {row[0]: {"value": row[1] or 0.0, "contributions": row[2] or 0.0, "source": "accounts"} for row in acct_rows}
 
+    agg_rows = db.query(PortfolioAggregateSnapshot).order_by(
+        PortfolioAggregateSnapshot.snapshot_date
+    ).all()
+
     if account_ids is None:
-        agg_rows = db.query(PortfolioAggregateSnapshot).order_by(PortfolioAggregateSnapshot.snapshot_date).all()
         agg_map = {row.snapshot_date: {"value": row.total_value, "contributions": row.contributions_since_last or 0.0, "source": "aggregate"} for row in agg_rows}
         combined = {**acct_map, **agg_map}
     else:
-        combined = acct_map
+        # Compute the ratio of selected accounts to all accounts so we can
+        # scale aggregate snapshots proportionally.
+        all_acct_rows = (
+            db.query(
+                AccountSnapshot.snapshot_date,
+                func.sum(AccountSnapshot.balance),
+            )
+            .group_by(AccountSnapshot.snapshot_date)
+            .all()
+        )
+        all_acct_totals = {row[0]: (row[1] or 0.0) for row in all_acct_rows}
+
+        ratios = []
+        for d in sorted(acct_map.keys()):
+            all_total = all_acct_totals.get(d, 0.0)
+            if all_total > 0:
+                ratios.append(acct_map[d]["value"] / all_total)
+
+        ratio = sum(ratios) / len(ratios) if ratios else 1.0
+
+        agg_map = {}
+        for row in agg_rows:
+            agg_map[row.snapshot_date] = {
+                "value": row.total_value * ratio,
+                "contributions": (row.contributions_since_last or 0.0) * ratio,
+                "source": "aggregate_scaled",
+            }
+
+        # Per-account data takes precedence over scaled aggregates
+        combined = {**agg_map, **acct_map}
 
     timeline = sorted(combined.items(), key=lambda x: x[0])
     return [{"date": d, **v} for d, v in timeline]

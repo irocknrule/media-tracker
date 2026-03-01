@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { portfolioService } from '../services/portfolioService';
 import { getErrorMessage } from '../utils/errorHandler';
@@ -14,14 +14,42 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  Cell,
+  Treemap,
 } from 'recharts';
 
 export default function Portfolio() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('overview');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'overview';
+  const urlTicker = searchParams.get('ticker') || '';
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const setActiveTab = (tab) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (tab === 'overview') {
+        next.delete('tab');
+      } else {
+        next.set('tab', tab);
+      }
+      next.delete('ticker');
+      return next;
+    });
+  };
+
+  const navigateToTicker = (ticker) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', 'holdings');
+      if (ticker) {
+        next.set('ticker', ticker);
+      }
+      return next;
+    });
+  };
 
   // Overview state
   const [summary, setSummary] = useState(null);
@@ -86,6 +114,12 @@ export default function Portfolio() {
   const [tickerSortKey, setTickerSortKey] = useState('total_amount');
   const [tickerSortDir, setTickerSortDir] = useState('desc');
 
+  // Top Performers state
+  const [performanceData, setPerformanceData] = useState(null);
+  const [performanceTimeframe, setPerformanceTimeframe] = useState('all');
+  const [perfSortKey, setPerfSortKey] = useState('period_return_pct');
+  const [perfSortDir, setPerfSortDir] = useState('desc');
+
   useEffect(() => {
     if (activeTab === 'overview') {
       loadSummary();
@@ -100,6 +134,8 @@ export default function Portfolio() {
       loadAllocationData();
     } else if (activeTab === 'yearly') {
       loadYearlyInvestments();
+    } else if (activeTab === 'performers') {
+      loadPerformance(performanceTimeframe);
     }
   }, [activeTab]);
 
@@ -108,6 +144,12 @@ export default function Portfolio() {
       loadTickerDetails();
     }
   }, [selectedTicker, activeTab]);
+
+  useEffect(() => {
+    if (urlTicker && urlTicker !== selectedTicker) {
+      setSelectedTicker(urlTicker);
+    }
+  }, [urlTicker]);
 
   useEffect(() => {
     if (tickerHolding && selectedTicker) {
@@ -233,6 +275,25 @@ export default function Portfolio() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadPerformance = async (tf) => {
+    try {
+      setLoading(true);
+      setError('');
+      const data = await portfolioService.getPerformance(tf);
+      setPerformanceData(data);
+    } catch (err) {
+      console.error('Error loading performance:', err);
+      setError(getErrorMessage(err) || 'Failed to load performance data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTimeframeChange = (tf) => {
+    setPerformanceTimeframe(tf);
+    loadPerformance(tf);
   };
 
   const handleDeleteAllTransactions = async () => {
@@ -799,6 +860,15 @@ export default function Portfolio() {
           >
             Yearly Investments
           </button>
+          <button
+            style={{
+              ...styles.tab,
+              ...(activeTab === 'performers' ? styles.tabActive : {}),
+            }}
+            onClick={() => setActiveTab('performers')}
+          >
+            Top Performers
+          </button>
         </div>
 
         {error && (
@@ -915,8 +985,7 @@ export default function Portfolio() {
                               key={holding.ticker}
                               style={styles.tr}
                               onClick={() => {
-                                setActiveTab('holdings');
-                                setSelectedTicker(holding.ticker);
+                                navigateToTicker(holding.ticker);
                               }}
                             >
                               <td style={styles.td}>
@@ -1241,7 +1310,14 @@ export default function Portfolio() {
                   </label>
                   <select
                     value={selectedTicker}
-                    onChange={(e) => setSelectedTicker(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedTicker(e.target.value);
+                      setSearchParams((prev) => {
+                        const next = new URLSearchParams(prev);
+                        next.set('ticker', e.target.value);
+                        return next;
+                      }, { replace: true });
+                    }}
                     style={styles.select}
                   >
                     {tickers.map((ticker) => (
@@ -1860,8 +1936,7 @@ export default function Portfolio() {
                                                 style={styles.tickerButton}
                                                 onClick={(e) => {
                                                   e.stopPropagation();
-                                                  setSelectedTicker(t.ticker);
-                                                  setActiveTab('holdings');
+                                                  navigateToTicker(t.ticker);
                                                 }}
                                               >
                                                 {t.ticker}
@@ -1930,6 +2005,436 @@ export default function Portfolio() {
             ) : (
               <p style={styles.info}>No buy transactions found. Add transactions to see yearly investment data.</p>
             )}
+          </div>
+        )}
+
+        {/* Top Performers Tab */}
+        {activeTab === 'performers' && (
+          <div style={styles.tabContent}>
+            <h2 style={styles.sectionTitle}>🏆 Top Performers</h2>
+
+            {/* Timeframe selector */}
+            <div style={perfStyles.timeframeBar}>
+              {[
+                { key: '1m', label: '1M' },
+                { key: '3m', label: '3M' },
+                { key: '6m', label: '6M' },
+                { key: 'ytd', label: 'YTD' },
+                { key: '1y', label: '1Y' },
+                { key: '3y', label: '3Y' },
+                { key: '5y', label: '5Y' },
+                { key: 'all', label: 'All Time' },
+              ].map((tf) => (
+                <button
+                  key={tf.key}
+                  style={{
+                    ...perfStyles.timeframeButton,
+                    ...(performanceTimeframe === tf.key ? perfStyles.timeframeButtonActive : {}),
+                  }}
+                  onClick={() => handleTimeframeChange(tf.key)}
+                >
+                  {tf.label}
+                </button>
+              ))}
+            </div>
+
+            {performanceData && performanceData.tickers.length > 0 ? (
+              <>
+                {/* Summary cards */}
+                <div style={styles.metricsGrid}>
+                  <div style={styles.metricCard}>
+                    <div style={styles.metricLabel}>Portfolio Return</div>
+                    <div style={{
+                      ...styles.metricValue,
+                      color: performanceData.portfolio_period_return_pct != null
+                        ? performanceData.portfolio_period_return_pct >= 0 ? '#00cc88' : '#ff4444'
+                        : '#333',
+                    }}>
+                      {performanceData.portfolio_period_return_pct != null
+                        ? `${performanceData.portfolio_period_return_pct >= 0 ? '+' : ''}${performanceData.portfolio_period_return_pct.toFixed(2)}%`
+                        : 'N/A'}
+                    </div>
+                  </div>
+                  <div style={styles.metricCard}>
+                    <div style={styles.metricLabel}>Portfolio P/L</div>
+                    <div style={{
+                      ...styles.metricValue,
+                      color: performanceData.portfolio_period_dollar_change != null
+                        ? performanceData.portfolio_period_dollar_change >= 0 ? '#00cc88' : '#ff4444'
+                        : '#333',
+                    }}>
+                      {performanceData.portfolio_period_dollar_change != null
+                        ? formatCurrency(performanceData.portfolio_period_dollar_change)
+                        : 'N/A'}
+                    </div>
+                  </div>
+                  {(() => {
+                    const best = performanceData.tickers.find((t) => t.period_return_pct != null);
+                    return (
+                      <div style={{ ...styles.metricCard, borderLeft: '4px solid #00cc88' }}>
+                        <div style={styles.metricLabel}>Best Performer</div>
+                        <div style={{ ...styles.metricValue, color: '#00cc88' }}>
+                          {best ? `${best.ticker} (${best.period_return_pct >= 0 ? '+' : ''}${best.period_return_pct.toFixed(1)}%)` : 'N/A'}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {(() => {
+                    const withReturns = performanceData.tickers.filter((t) => t.period_return_pct != null);
+                    const worst = withReturns.length > 0 ? withReturns[withReturns.length - 1] : null;
+                    return (
+                      <div style={{ ...styles.metricCard, borderLeft: '4px solid #ff4444' }}>
+                        <div style={styles.metricLabel}>Worst Performer</div>
+                        <div style={{ ...styles.metricValue, color: '#ff4444' }}>
+                          {worst ? `${worst.ticker} (${worst.period_return_pct >= 0 ? '+' : ''}${worst.period_return_pct.toFixed(1)}%)` : 'N/A'}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Performance bar chart - % returns */}
+                <div style={styles.section}>
+                  <h3 style={styles.subsectionTitle}>Return by Ticker (%)</h3>
+                  <div style={{ marginTop: '1rem' }}>
+                    <ResponsiveContainer width="100%" height={Math.max(300, performanceData.tickers.filter((t) => t.period_return_pct != null).length * 40)}>
+                      <BarChart
+                        data={performanceData.tickers
+                          .filter((t) => t.period_return_pct != null)
+                          .map((t) => ({
+                            ticker: t.ticker,
+                            return_pct: parseFloat(t.period_return_pct.toFixed(2)),
+                          }))}
+                        layout="vertical"
+                        margin={{ top: 5, right: 40, left: 60, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.2)" horizontal={false} />
+                        <XAxis
+                          type="number"
+                          stroke="#666"
+                          tick={{ fill: '#666', fontSize: 12 }}
+                          tickFormatter={(v) => `${v}%`}
+                        />
+                        <YAxis
+                          type="category"
+                          dataKey="ticker"
+                          stroke="#666"
+                          tick={{ fill: '#333', fontSize: 13, fontWeight: 500 }}
+                          width={55}
+                        />
+                        <Tooltip
+                          formatter={(value) => [`${value >= 0 ? '+' : ''}${value.toFixed(2)}%`, 'Return']}
+                          contentStyle={{ backgroundColor: 'rgba(255,255,255,0.95)', border: '1px solid #ccc', borderRadius: '4px' }}
+                        />
+                        <ReferenceLine x={0} stroke="#999" strokeDasharray="3 3" />
+                        <Bar dataKey="return_pct" name="Return %" radius={[0, 4, 4, 0]}>
+                          {performanceData.tickers
+                            .filter((t) => t.period_return_pct != null)
+                            .map((t, i) => (
+                              <Cell key={i} fill={t.period_return_pct >= 0 ? '#00cc88' : '#ff4444'} />
+                            ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Dollar gain/loss bar chart */}
+                <div style={styles.section}>
+                  <h3 style={styles.subsectionTitle}>Dollar Gain/Loss by Ticker</h3>
+                  <div style={{ marginTop: '1rem' }}>
+                    <ResponsiveContainer width="100%" height={Math.max(300, performanceData.tickers.filter((t) => t.period_dollar_change != null).length * 40)}>
+                      <BarChart
+                        data={performanceData.tickers
+                          .filter((t) => t.period_dollar_change != null)
+                          .sort((a, b) => b.period_dollar_change - a.period_dollar_change)
+                          .map((t) => ({
+                            ticker: t.ticker,
+                            dollar_change: parseFloat(t.period_dollar_change.toFixed(2)),
+                          }))}
+                        layout="vertical"
+                        margin={{ top: 5, right: 40, left: 60, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.2)" horizontal={false} />
+                        <XAxis
+                          type="number"
+                          stroke="#666"
+                          tick={{ fill: '#666', fontSize: 12 }}
+                          tickFormatter={(v) => `$${v >= 1000 || v <= -1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0)}`}
+                        />
+                        <YAxis
+                          type="category"
+                          dataKey="ticker"
+                          stroke="#666"
+                          tick={{ fill: '#333', fontSize: 13, fontWeight: 500 }}
+                          width={55}
+                        />
+                        <Tooltip
+                          formatter={(value) => [formatCurrency(value), 'Gain/Loss']}
+                          contentStyle={{ backgroundColor: 'rgba(255,255,255,0.95)', border: '1px solid #ccc', borderRadius: '4px' }}
+                        />
+                        <ReferenceLine x={0} stroke="#999" strokeDasharray="3 3" />
+                        <Bar dataKey="dollar_change" name="Gain/Loss" radius={[0, 4, 4, 0]}>
+                          {performanceData.tickers
+                            .filter((t) => t.period_dollar_change != null)
+                            .sort((a, b) => b.period_dollar_change - a.period_dollar_change)
+                            .map((t, i) => (
+                              <Cell key={i} fill={t.period_dollar_change >= 0 ? '#00cc88' : '#ff4444'} />
+                            ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Investment treemap */}
+                {(() => {
+                  const treemapData = performanceData.tickers
+                    .filter((t) => t.current_value != null && t.current_value > 0)
+                    .map((t) => ({
+                      name: t.ticker,
+                      size: t.current_value,
+                      returnPct: t.period_return_pct,
+                    }));
+                  if (treemapData.length === 0) return null;
+
+                  const TREEMAP_COLORS = [
+                    '#004d00', '#006600', '#008800', '#00aa00', '#00cc88',
+                    '#88ddaa', '#cccccc',
+                    '#ffaaaa', '#ff7777', '#ff4444', '#cc0000', '#990000',
+                  ];
+
+                  const getTreemapColor = (pct) => {
+                    if (pct == null) return '#cccccc';
+                    if (pct >= 50) return TREEMAP_COLORS[0];
+                    if (pct >= 30) return TREEMAP_COLORS[1];
+                    if (pct >= 20) return TREEMAP_COLORS[2];
+                    if (pct >= 10) return TREEMAP_COLORS[3];
+                    if (pct >= 5) return TREEMAP_COLORS[4];
+                    if (pct >= 0) return TREEMAP_COLORS[5];
+                    if (pct >= -5) return TREEMAP_COLORS[7];
+                    if (pct >= -10) return TREEMAP_COLORS[8];
+                    if (pct >= -20) return TREEMAP_COLORS[9];
+                    if (pct >= -30) return TREEMAP_COLORS[10];
+                    return TREEMAP_COLORS[11];
+                  };
+
+                  const TreemapContent = ({ x, y, width, height, name, returnPct, size }) => {
+                    if (width < 30 || height < 25) return null;
+                    const showValue = width > 60 && height > 45;
+                    return (
+                      <g>
+                        <rect x={x} y={y} width={width} height={height} rx={4} ry={4}
+                          style={{ fill: getTreemapColor(returnPct), stroke: '#fff', strokeWidth: 2 }}
+                        />
+                        <text x={x + width / 2} y={y + height / 2 - (showValue ? 8 : 0)} textAnchor="middle" dominantBaseline="central"
+                          style={{ fontSize: Math.min(14, width / 5), fill: '#fff', fontWeight: 'bold' }}
+                        >
+                          {name}
+                        </text>
+                        {showValue && (
+                          <text x={x + width / 2} y={y + height / 2 + 12} textAnchor="middle" dominantBaseline="central"
+                            style={{ fontSize: Math.min(11, width / 6), fill: 'rgba(255,255,255,0.85)' }}
+                          >
+                            {returnPct != null ? `${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}%` : ''}
+                          </text>
+                        )}
+                      </g>
+                    );
+                  };
+
+                  return (
+                    <div style={styles.section}>
+                      <h3 style={styles.subsectionTitle}>Portfolio Heatmap (size = value, color = return)</h3>
+                      <div style={{ marginTop: '1rem' }}>
+                        <ResponsiveContainer width="100%" height={400}>
+                          <Treemap
+                            data={treemapData}
+                            dataKey="size"
+                            nameKey="name"
+                            content={<TreemapContent />}
+                          >
+                            <Tooltip
+                              content={({ payload }) => {
+                                if (!payload || !payload.length) return null;
+                                const d = payload[0].payload;
+                                return (
+                                  <div style={{ backgroundColor: 'rgba(255,255,255,0.95)', border: '1px solid #ccc', borderRadius: '4px', padding: '0.5rem' }}>
+                                    <p style={{ margin: '0 0 0.25rem', fontWeight: 'bold' }}>{d.name}</p>
+                                    <p style={{ margin: '0 0 0.15rem', fontSize: '0.9rem' }}>Value: {formatCurrency(d.size)}</p>
+                                    <p style={{ margin: 0, fontSize: '0.9rem', color: d.returnPct >= 0 ? '#00cc88' : '#ff4444' }}>
+                                      Return: {d.returnPct != null ? `${d.returnPct >= 0 ? '+' : ''}${d.returnPct.toFixed(2)}%` : 'N/A'}
+                                    </p>
+                                  </div>
+                                );
+                              }}
+                            />
+                          </Treemap>
+                        </ResponsiveContainer>
+                        <div style={perfStyles.legendBar}>
+                          <span style={{ fontSize: '0.8rem', color: '#666' }}>◄ Loss</span>
+                          <div style={perfStyles.legendGradient} />
+                          <span style={{ fontSize: '0.8rem', color: '#666' }}>Gain ►</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Invested vs Current Value comparison */}
+                <div style={styles.section}>
+                  <h3 style={styles.subsectionTitle}>Invested vs Current Value</h3>
+                  <div style={{ marginTop: '1rem' }}>
+                    <ResponsiveContainer width="100%" height={Math.max(300, performanceData.tickers.filter((t) => t.current_value != null).length * 45)}>
+                      <BarChart
+                        data={performanceData.tickers
+                          .filter((t) => t.current_value != null)
+                          .sort((a, b) => b.current_value - a.current_value)
+                          .map((t) => ({
+                            ticker: t.ticker,
+                            invested: parseFloat(t.total_invested.toFixed(2)),
+                            current: parseFloat(t.current_value.toFixed(2)),
+                          }))}
+                        layout="vertical"
+                        margin={{ top: 5, right: 40, left: 60, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.2)" horizontal={false} />
+                        <XAxis
+                          type="number"
+                          stroke="#666"
+                          tick={{ fill: '#666', fontSize: 12 }}
+                          tickFormatter={(v) => `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v.toFixed(0)}`}
+                        />
+                        <YAxis
+                          type="category"
+                          dataKey="ticker"
+                          stroke="#666"
+                          tick={{ fill: '#333', fontSize: 13, fontWeight: 500 }}
+                          width={55}
+                        />
+                        <Tooltip
+                          formatter={(value) => [formatCurrency(value)]}
+                          contentStyle={{ backgroundColor: 'rgba(255,255,255,0.95)', border: '1px solid #ccc', borderRadius: '4px' }}
+                        />
+                        <Bar dataKey="invested" name="Invested" fill="#6c757d" radius={[0, 4, 4, 0]} />
+                        <Bar dataKey="current" name="Current Value" fill="#007bff" radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Detailed table */}
+                <div style={styles.section}>
+                  <h3 style={styles.subsectionTitle}>Detailed Breakdown</h3>
+                  <div style={styles.tableContainer}>
+                    <table style={styles.table}>
+                      <thead>
+                        <tr>
+                          {[
+                            { key: 'ticker', label: 'Ticker' },
+                            { key: 'current_value', label: 'Current Value' },
+                            { key: 'total_invested', label: 'Invested' },
+                            { key: 'period_return_pct', label: 'Period Return' },
+                            { key: 'period_dollar_change', label: 'Period P/L' },
+                            { key: 'all_time_return_pct', label: 'All-Time Return' },
+                            { key: 'all_time_dollar_change', label: 'All-Time P/L' },
+                            { key: 'current_price', label: 'Price' },
+                            { key: 'quantity', label: 'Shares' },
+                          ].map((col) => (
+                            <th
+                              key={col.key}
+                              style={{ ...styles.th, cursor: 'pointer', userSelect: 'none' }}
+                              onClick={() => {
+                                if (perfSortKey === col.key) {
+                                  setPerfSortDir(perfSortDir === 'asc' ? 'desc' : 'asc');
+                                } else {
+                                  setPerfSortKey(col.key);
+                                  setPerfSortDir(col.key === 'ticker' ? 'asc' : 'desc');
+                                }
+                              }}
+                            >
+                              {col.label}
+                              {perfSortKey === col.key && (
+                                <span style={{ marginLeft: '4px', fontSize: '0.7rem' }}>
+                                  {perfSortDir === 'asc' ? '▲' : '▼'}
+                                </span>
+                              )}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...performanceData.tickers]
+                          .sort((a, b) => {
+                            const va = a[perfSortKey] ?? -Infinity;
+                            const vb = b[perfSortKey] ?? -Infinity;
+                            if (typeof va === 'string') {
+                              return perfSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+                            }
+                            return perfSortDir === 'asc' ? va - vb : vb - va;
+                          })
+                          .map((t) => (
+                            <tr key={t.ticker} style={styles.tr}>
+                              <td style={styles.td}>
+                                <button style={styles.tickerButton} onClick={() => navigateToTicker(t.ticker)}>
+                                  {t.ticker}
+                                </button>
+                              </td>
+                              <td style={styles.td}>
+                                {t.current_value != null ? formatCurrency(t.current_value) : 'N/A'}
+                              </td>
+                              <td style={styles.td}>{formatCurrency(t.total_invested)}</td>
+                              <td style={{
+                                ...styles.td,
+                                fontWeight: 'bold',
+                                color: t.period_return_pct != null
+                                  ? t.period_return_pct >= 0 ? '#00cc88' : '#ff4444'
+                                  : undefined,
+                              }}>
+                                {t.period_return_pct != null
+                                  ? `${t.period_return_pct >= 0 ? '+' : ''}${t.period_return_pct.toFixed(2)}%`
+                                  : '—'}
+                              </td>
+                              <td style={{
+                                ...styles.td,
+                                color: t.period_dollar_change != null
+                                  ? t.period_dollar_change >= 0 ? '#00cc88' : '#ff4444'
+                                  : undefined,
+                              }}>
+                                {t.period_dollar_change != null ? formatCurrency(t.period_dollar_change) : '—'}
+                              </td>
+                              <td style={{
+                                ...styles.td,
+                                color: t.all_time_return_pct != null
+                                  ? t.all_time_return_pct >= 0 ? '#00cc88' : '#ff4444'
+                                  : undefined,
+                              }}>
+                                {t.all_time_return_pct != null
+                                  ? `${t.all_time_return_pct >= 0 ? '+' : ''}${t.all_time_return_pct.toFixed(2)}%`
+                                  : '—'}
+                              </td>
+                              <td style={{
+                                ...styles.td,
+                                color: t.all_time_dollar_change != null
+                                  ? t.all_time_dollar_change >= 0 ? '#00cc88' : '#ff4444'
+                                  : undefined,
+                              }}>
+                                {t.all_time_dollar_change != null ? formatCurrency(t.all_time_dollar_change) : '—'}
+                              </td>
+                              <td style={styles.td}>
+                                {t.current_price != null ? `$${t.current_price.toFixed(2)}` : 'N/A'}
+                              </td>
+                              <td style={styles.td}>{t.quantity.toFixed(4)}</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            ) : !loading ? (
+              <p style={styles.info}>No holdings found. Add transactions to see performance data.</p>
+            ) : null}
           </div>
         )}
       </div>
@@ -2913,5 +3418,43 @@ const yearlyStyles = {
     padding: '0.5rem 0.75rem',
     borderBottom: '1px solid #e8e8e8',
     fontSize: '0.9rem',
+  },
+};
+
+const perfStyles = {
+  timeframeBar: {
+    display: 'flex',
+    gap: '0.5rem',
+    marginBottom: '1.5rem',
+    flexWrap: 'wrap',
+  },
+  timeframeButton: {
+    padding: '0.5rem 1rem',
+    backgroundColor: '#f0f0f0',
+    border: '1px solid #ddd',
+    borderRadius: '20px',
+    cursor: 'pointer',
+    fontSize: '0.9rem',
+    fontWeight: '500',
+    color: '#555',
+    transition: 'all 0.2s',
+  },
+  timeframeButtonActive: {
+    backgroundColor: '#007bff',
+    color: '#fff',
+    borderColor: '#007bff',
+  },
+  legendBar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '0.5rem',
+    marginTop: '0.5rem',
+  },
+  legendGradient: {
+    width: '200px',
+    height: '12px',
+    borderRadius: '6px',
+    background: 'linear-gradient(to right, #990000, #ff4444, #cccccc, #00cc88, #004d00)',
   },
 };

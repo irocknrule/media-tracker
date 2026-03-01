@@ -112,4 +112,10 @@ export const portfolioService = {
     const response = await api.get('/portfolio/yearly-investments');
     return response.data;
   },
+
+  // Performance
+  getPerformance: async (timeframe = 'all') => {
+    const response = await api.get('/portfolio/performance', { params: { timeframe } });
+    return response.data;
+  },
 };

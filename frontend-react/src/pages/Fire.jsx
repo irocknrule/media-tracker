@@ -1171,10 +1171,6 @@ export default function Fire() {
                         {formatCurrency(incomeHistory.total_investment_income)}
                       </div>
                     </div>
-                    <div style={styles.metricCard}>
-                      <div style={styles.metricLabel}>Total Contributions</div>
-                      <div style={styles.metricValue}>{formatCurrency(incomeHistory.total_contributions)}</div>
-                    </div>
                     {incomeHistory.entries.length > 0 && (
                       <div style={styles.metricCard}>
                         <div style={styles.metricLabel}>Last Period Income</div>
@@ -1214,7 +1210,6 @@ export default function Fire() {
                         />
                         <Legend />
                         <Bar yAxisId="left" dataKey="investment_income" fill="#28a745" name="Investment Income" />
-                        <Bar yAxisId="left" dataKey="contributions" fill="#007bff" name="Contributions" />
                         <Line yAxisId="right" type="monotone" dataKey="ending_balance" stroke="#999" name="Ending Balance" dot={false} strokeWidth={2} />
                       </ComposedChart>
                     </ResponsiveContainer>
@@ -1229,7 +1224,6 @@ export default function Fire() {
                           <th style={styles.th}>Period</th>
                           <th style={{ ...styles.th, textAlign: 'right' }}>Starting Balance</th>
                           <th style={{ ...styles.th, textAlign: 'right' }}>Ending Balance</th>
-                          <th style={{ ...styles.th, textAlign: 'right' }}>Contributions</th>
                           <th style={{ ...styles.th, textAlign: 'right' }}>Investment Income</th>
                           <th style={{ ...styles.th, textAlign: 'right' }}>Growth Rate</th>
                         </tr>
@@ -1240,7 +1234,6 @@ export default function Fire() {
                             <td style={styles.td}>{entry.period_start} to {entry.period_end}</td>
                             <td style={{ ...styles.td, textAlign: 'right' }}>{formatCurrency(entry.starting_balance)}</td>
                             <td style={{ ...styles.td, textAlign: 'right' }}>{formatCurrency(entry.ending_balance)}</td>
-                            <td style={{ ...styles.td, textAlign: 'right' }}>{formatCurrency(entry.contributions)}</td>
                             <td style={{
                               ...styles.td,
                               textAlign: 'right',

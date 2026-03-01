@@ -16,6 +16,8 @@ from backend.schemas import (
     PortfolioSummary,
     YearlyInvestment,
     YearlyInvestmentTicker,
+    TickerPerformance,
+    PerformanceSummary,
 )
 import requests
 
@@ -1078,4 +1080,148 @@ def get_ticker_splits(
         "splits": splits,
         "total_splits": len(splits)
     }
+
+
+def _get_period_start_price(ticker: str, start_date: date) -> Optional[float]:
+    """Get the closing price for a ticker on or near a given date."""
+    try:
+        import yfinance as yf
+        import pandas as pd
+        from datetime import timedelta as td
+
+        stock = yf.Ticker(ticker)
+        end_dt = start_date + td(days=5)
+        hist = stock.history(start=start_date.isoformat(), end=end_dt.isoformat())
+        if hist is not None and not hist.empty and 'Close' in hist.columns:
+            return float(hist['Close'].iloc[0])
+
+        hist = stock.history(period='1mo')
+        if hist is not None and not hist.empty and 'Close' in hist.columns:
+            target = pd.Timestamp(start_date)
+            if hist.index.tz is not None:
+                target = target.tz_localize(hist.index.tz)
+            idx = hist.index.get_indexer([target], method='nearest')[0]
+            if 0 <= idx < len(hist):
+                return float(hist['Close'].iloc[idx])
+        return None
+    except Exception as e:
+        print(f"Error fetching period start price for {ticker}: {e}")
+        return None
+
+
+from datetime import timedelta
+
+TIMEFRAME_DAYS = {
+    "1m": 30,
+    "3m": 91,
+    "6m": 182,
+    "1y": 365,
+    "3y": 365 * 3,
+    "5y": 365 * 5,
+}
+
+
+@router.get("/performance", response_model=PerformanceSummary)
+def get_performance(
+    timeframe: str = "all",
+    db: Session = Depends(get_db),
+):
+    """
+    Get portfolio performance data ranked by returns.
+    Timeframe options: 1m, 3m, 6m, 1y, 3y, 5y, ytd, all
+    """
+    tickers_list = db.query(PortfolioTransactionModel.ticker).distinct().all()
+    tickers_list = [t[0] for t in tickers_list]
+
+    today = date.today()
+
+    if timeframe == "ytd":
+        period_start = date(today.year, 1, 1)
+    elif timeframe in TIMEFRAME_DAYS:
+        period_start = today - timedelta(days=TIMEFRAME_DAYS[timeframe])
+    else:
+        period_start = None  # "all" uses cost basis
+
+    results = []
+    portfolio_invested = 0.0
+    portfolio_current = 0.0
+    portfolio_period_start_value = 0.0
+    has_all_prices = True
+
+    for ticker in tickers_list:
+        transactions = (
+            db.query(PortfolioTransactionModel)
+            .filter(PortfolioTransactionModel.ticker == ticker)
+            .order_by(PortfolioTransactionModel.transaction_date)
+            .all()
+        )
+        if not transactions:
+            continue
+
+        holding = calculate_ticker_holdings(transactions)
+        if holding["total_quantity"] <= 0:
+            continue
+
+        current_price = get_current_stock_price(ticker)
+        qty = holding["total_quantity"]
+        invested = holding["total_invested"]
+        current_value = current_price * qty if current_price else None
+
+        all_time_dollar = (current_value - invested) if current_value is not None else None
+        all_time_pct = (all_time_dollar / invested * 100) if (all_time_dollar is not None and invested > 0) else None
+
+        period_start_price = None
+        period_return_pct = None
+        period_dollar_change = None
+
+        if period_start is not None and current_price is not None:
+            period_start_price = _get_period_start_price(ticker, period_start)
+            if period_start_price and period_start_price > 0:
+                period_return_pct = (current_price - period_start_price) / period_start_price * 100
+                period_dollar_change = (current_price - period_start_price) * qty
+                portfolio_period_start_value += period_start_price * qty
+        elif period_start is None:
+            period_return_pct = all_time_pct
+            period_dollar_change = all_time_dollar
+
+        portfolio_invested += invested
+        if current_value is not None:
+            portfolio_current += current_value
+        else:
+            has_all_prices = False
+
+        results.append(TickerPerformance(
+            ticker=ticker,
+            asset_type=transactions[0].asset_type,
+            quantity=qty,
+            current_price=current_price,
+            period_start_price=period_start_price,
+            period_return_pct=period_return_pct,
+            period_dollar_change=period_dollar_change,
+            total_invested=invested,
+            current_value=current_value,
+            all_time_return_pct=all_time_pct,
+            all_time_dollar_change=all_time_dollar,
+        ))
+
+    results.sort(key=lambda t: t.period_return_pct if t.period_return_pct is not None else -9999, reverse=True)
+
+    if period_start is not None and portfolio_period_start_value > 0 and has_all_prices:
+        port_period_pct = (portfolio_current - portfolio_period_start_value) / portfolio_period_start_value * 100
+        port_period_dollar = portfolio_current - portfolio_period_start_value
+    elif period_start is None and portfolio_invested > 0 and has_all_prices:
+        port_period_pct = (portfolio_current - portfolio_invested) / portfolio_invested * 100
+        port_period_dollar = portfolio_current - portfolio_invested
+    else:
+        port_period_pct = None
+        port_period_dollar = None
+
+    return PerformanceSummary(
+        timeframe=timeframe,
+        tickers=results,
+        portfolio_period_return_pct=port_period_pct,
+        portfolio_period_dollar_change=port_period_dollar,
+        portfolio_total_invested=portfolio_invested,
+        portfolio_current_value=portfolio_current if has_all_prices else None,
+    )
 

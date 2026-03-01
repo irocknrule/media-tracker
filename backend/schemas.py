@@ -377,6 +377,30 @@ class YearlyInvestment(BaseModel):
     gain_loss_percentage: Optional[float] = None  # (gain_loss / cost_basis_remaining) * 100 when > 0
 
 
+# Performance / Top Performers schemas
+class TickerPerformance(BaseModel):
+    ticker: str
+    asset_type: str
+    quantity: float
+    current_price: Optional[float] = None
+    period_start_price: Optional[float] = None
+    period_return_pct: Optional[float] = None
+    period_dollar_change: Optional[float] = None
+    total_invested: float
+    current_value: Optional[float] = None
+    all_time_return_pct: Optional[float] = None
+    all_time_dollar_change: Optional[float] = None
+
+
+class PerformanceSummary(BaseModel):
+    timeframe: str
+    tickers: List[TickerPerformance]
+    portfolio_period_return_pct: Optional[float] = None
+    portfolio_period_dollar_change: Optional[float] = None
+    portfolio_total_invested: float
+    portfolio_current_value: Optional[float] = None
+
+
 # Asset Allocation schemas
 class AssetAllocationTargetBase(BaseModel):
     """Base schema for asset allocation target"""
