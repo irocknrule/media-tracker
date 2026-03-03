@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { portfolioService } from '../services/portfolioService';
 import { getErrorMessage } from '../utils/errorHandler';
+import { formatCurrency, formatCurrencyPrecise, formatPercent } from '../utils/formatters';
+import ConfirmModal from '../components/ConfirmModal';
 import {
   AreaChart,
   Area,
@@ -26,6 +28,7 @@ export default function Portfolio() {
   const urlTicker = searchParams.get('ticker') || '';
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [confirmModal, setConfirmModal] = useState(null);
 
   const setActiveTab = (tab) => {
     setSearchParams((prev) => {
@@ -114,11 +117,50 @@ export default function Portfolio() {
   const [tickerSortKey, setTickerSortKey] = useState('total_amount');
   const [tickerSortDir, setTickerSortDir] = useState('desc');
 
+  // Value history state (C4)
+  const [valueHistory, setValueHistory] = useState(null);
+
+  // Benchmark state (C3)
+  const [benchmarkData, setBenchmarkData] = useState(null);
+  const [benchmarkTicker, setBenchmarkTicker] = useState('SPY');
+
+  // Pagination state (D5)
+  const [currentPage, setCurrentPage] = useState(1);
+  const transactionsPerPage = 50;
+
   // Top Performers state
   const [performanceData, setPerformanceData] = useState(null);
   const [performanceTimeframe, setPerformanceTimeframe] = useState('all');
   const [perfSortKey, setPerfSortKey] = useState('period_return_pct');
   const [perfSortDir, setPerfSortDir] = useState('desc');
+  const [returnMode, setReturnMode] = useState('market'); // 'market' or 'personal'
+
+  const perfView = useMemo(() => {
+    if (!performanceData) return null;
+    const isPersonal = returnMode === 'personal';
+    const tickers = performanceData.tickers.map((t) => ({
+      ...t,
+      activeReturnPct: isPersonal ? t.all_time_return_pct : t.period_return_pct,
+      activeDollarChange: isPersonal ? t.all_time_dollar_change : t.period_dollar_change,
+    }));
+    tickers.sort((a, b) => (b.activeReturnPct ?? -9999) - (a.activeReturnPct ?? -9999));
+
+    let portfolioReturnPct = performanceData.portfolio_period_return_pct;
+    let portfolioDollarChange = performanceData.portfolio_period_dollar_change;
+    if (isPersonal) {
+      const totalInvested = performanceData.portfolio_total_invested;
+      const totalCurrent = performanceData.portfolio_current_value;
+      if (totalInvested > 0 && totalCurrent != null) {
+        portfolioDollarChange = totalCurrent - totalInvested;
+        portfolioReturnPct = (portfolioDollarChange / totalInvested) * 100;
+      } else {
+        portfolioReturnPct = null;
+        portfolioDollarChange = null;
+      }
+    }
+
+    return { tickers, portfolioReturnPct, portfolioDollarChange };
+  }, [performanceData, returnMode]);
 
   useEffect(() => {
     if (activeTab === 'overview') {
@@ -165,12 +207,14 @@ export default function Portfolio() {
     try {
       setLoading(true);
       setError('');
-      const data = await portfolioService.getSummary();
+      const [data, txnData, histData] = await Promise.all([
+        portfolioService.getSummary(),
+        portfolioService.getTransactions(),
+        portfolioService.getValueHistory().catch(() => ({ history: [] })),
+      ]);
       setSummary(data);
-      
-      // Also load transaction count for delete all section
-      const txnData = await portfolioService.getTransactions();
       setTransactionCount(txnData.length || 0);
+      setValueHistory(histData.history || []);
     } catch (err) {
       console.error('Error loading summary:', err);
       setError(getErrorMessage(err) || 'Failed to load portfolio summary');
@@ -179,7 +223,35 @@ export default function Portfolio() {
     }
   };
 
+  const handleExportCSV = async () => {
+    try {
+      const data = await portfolioService.exportTransactions();
+      if (!data.rows || data.rows.length === 0) {
+        setError('No transactions to export');
+        return;
+      }
+      const headers = Object.keys(data.rows[0]);
+      const csv = [
+        headers.join(','),
+        ...data.rows.map(row => headers.map(h => {
+          const val = String(row[h] ?? '');
+          return val.includes(',') || val.includes('"') ? `"${val.replace(/"/g, '""')}"` : val;
+        }).join(',')),
+      ].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `portfolio_transactions_${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(getErrorMessage(err) || 'Failed to export transactions');
+    }
+  };
+
   const loadTransactions = async () => {
+    setCurrentPage(1);
     try {
       setLoading(true);
       setError('');
@@ -281,8 +353,12 @@ export default function Portfolio() {
     try {
       setLoading(true);
       setError('');
-      const data = await portfolioService.getPerformance(tf);
+      const [data, bench] = await Promise.all([
+        portfolioService.getPerformance(tf),
+        portfolioService.getBenchmark(benchmarkTicker, tf).catch(() => null),
+      ]);
       setPerformanceData(data);
+      setBenchmarkData(bench);
     } catch (err) {
       console.error('Error loading performance:', err);
       setError(getErrorMessage(err) || 'Failed to load performance data');
@@ -303,7 +379,6 @@ export default function Portfolio() {
       setLoading(true);
       setError('');
       const result = await portfolioService.deleteAllTransactions();
-      alert(`Successfully deleted ${result.deleted_count || 0} transaction(s)!`);
       setShowDeleteAll(false);
       setConfirmDeleteAll(false);
       loadSummary();
@@ -381,28 +456,30 @@ export default function Portfolio() {
     }
   };
 
-  const handleDeleteTransaction = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this transaction?')) {
-      return;
-    }
-    
-    try {
-      setLoading(true);
-      setError('');
-      await portfolioService.deleteTransaction(id);
-      
-      // Reload data
-      if (activeTab === 'transactions') {
-        loadTransactions();
-      } else if (activeTab === 'holdings' && selectedTicker) {
-        loadTickerDetails();
-      }
-    } catch (err) {
-      console.error('Error deleting transaction:', err);
-      setError(getErrorMessage(err) || 'Failed to delete transaction');
-    } finally {
-      setLoading(false);
-    }
+  const handleDeleteTransaction = (id) => {
+    setConfirmModal({
+      title: 'Delete Transaction',
+      message: 'Are you sure you want to delete this transaction?',
+      danger: true,
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          setLoading(true);
+          setError('');
+          await portfolioService.deleteTransaction(id);
+          if (activeTab === 'transactions') {
+            loadTransactions();
+          } else if (activeTab === 'holdings' && selectedTicker) {
+            loadTickerDetails();
+          }
+        } catch (err) {
+          console.error('Error deleting transaction:', err);
+          setError(getErrorMessage(err) || 'Failed to delete transaction');
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
   };
 
   const handleDeleteTickerTransactions = async () => {
@@ -424,7 +501,6 @@ export default function Portfolio() {
         }
       }
       
-      alert(`Successfully deleted ${deletedCount} transaction(s) for ${selectedTicker}!`);
       setConfirmDeleteTicker(false);
       loadTickers();
       setSelectedTicker('');
@@ -436,35 +512,37 @@ export default function Portfolio() {
     }
   };
 
-  const handleBulkDeleteTransactions = async () => {
+  const handleBulkDeleteTransactions = () => {
     if (selectedTransactions.size === 0) return;
-    if (!window.confirm(`Are you sure you want to delete ${selectedTransactions.size} selected transaction(s)?`)) {
-      return;
-    }
-    
-    try {
-      setLoading(true);
-      setError('');
-      let deletedCount = 0;
-      
-      for (const id of selectedTransactions) {
+    setConfirmModal({
+      title: 'Delete Selected Transactions',
+      message: `Are you sure you want to delete ${selectedTransactions.size} selected transaction(s)?`,
+      danger: true,
+      onConfirm: async () => {
+        setConfirmModal(null);
         try {
-          await portfolioService.deleteTransaction(id);
-          deletedCount++;
+          setLoading(true);
+          setError('');
+          let deletedCount = 0;
+          for (const id of selectedTransactions) {
+            try {
+              await portfolioService.deleteTransaction(id);
+              deletedCount++;
+            } catch (err) {
+              console.error(`Error deleting transaction ${id}:`, err);
+            }
+          }
+          setSelectedTransactions(new Set());
+          setError('');
+          loadTickerDetails();
         } catch (err) {
-          console.error(`Error deleting transaction ${id}:`, err);
+          console.error('Error bulk deleting transactions:', err);
+          setError(getErrorMessage(err) || 'Failed to delete transactions');
+        } finally {
+          setLoading(false);
         }
-      }
-      
-      setSelectedTransactions(new Set());
-      alert(`Successfully deleted ${deletedCount} transaction(s)!`);
-      loadTickerDetails();
-    } catch (err) {
-      console.error('Error bulk deleting transactions:', err);
-      setError(getErrorMessage(err) || 'Failed to delete transactions');
-    } finally {
-      setLoading(false);
-    }
+      },
+    });
   };
 
   const handleFileUpload = async () => {
@@ -594,23 +672,6 @@ export default function Portfolio() {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Format currency
-  const formatCurrency = (value) => {
-    if (value === null || value === undefined) return 'N/A';
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-  };
-
-  // Format percentage
-  const formatPercent = (value) => {
-    if (value === null || value === undefined) return 'N/A';
-    return `${value.toFixed(2)}%`;
   };
 
   // Calculate cumulative gain/loss timeline data
@@ -784,6 +845,16 @@ export default function Portfolio() {
 
   return (
     <div style={styles.container}>
+      {confirmModal && (
+        <ConfirmModal
+          title={confirmModal.title}
+          message={confirmModal.message}
+          danger={confirmModal.danger}
+          confirmLabel={confirmModal.confirmLabel || 'Delete'}
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
+      )}
       <header style={styles.header}>
         <div style={styles.headerLeft}>
           <button
@@ -921,9 +992,31 @@ export default function Portfolio() {
                   </div>
                 </div>
 
+                {valueHistory && valueHistory.length > 1 && (
+                  <div style={styles.section}>
+                    <h3 style={styles.subsectionTitle}>Portfolio Value Over Time</h3>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <AreaChart data={valueHistory}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.2)" />
+                        <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                        <YAxis tickFormatter={v => v >= 1000000 ? `$${(v / 1000000).toFixed(1)}M` : `$${(v / 1000).toFixed(0)}k`} />
+                        <Tooltip formatter={(value) => [formatCurrency(value)]} />
+                        <Area type="monotone" dataKey="total_invested" stroke="#6c757d" fill="#6c757d" fillOpacity={0.1} name="Total Invested" />
+                        <Area type="monotone" dataKey="current_value" stroke="#007bff" fill="#007bff" fillOpacity={0.15} name="Current Value" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+
                 <div style={styles.section}>
                   <div style={styles.sectionHeader}>
                     <h3 style={styles.subsectionTitle}>📈 Current Holdings</h3>
+                    <button
+                      style={{ ...styles.dangerButton, backgroundColor: '#6c757d' }}
+                      onClick={handleExportCSV}
+                    >
+                      📥 Export CSV
+                    </button>
                     <button
                       style={styles.dangerButton}
                       onClick={() => setShowDeleteAll(!showDeleteAll)}
@@ -1100,7 +1193,7 @@ export default function Portfolio() {
 
                 {transactions.length > 0 ? (
                   <div style={styles.transactionsList}>
-                    {transactions.map((txn) => (
+                    {transactions.slice((currentPage - 1) * transactionsPerPage, currentPage * transactionsPerPage).map((txn) => (
                       <div key={txn.id} style={styles.transactionCard}>
                         <div style={styles.transactionHeader}>
                           <strong>
@@ -1172,6 +1265,27 @@ export default function Portfolio() {
                   </div>
                 ) : (
                   <p style={styles.info}>No transactions found.</p>
+                )}
+                {transactions.length > transactionsPerPage && (
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', marginTop: '1rem', padding: '1rem 0' }}>
+                    <button
+                      style={{ padding: '0.4rem 0.8rem', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: currentPage === 1 ? '#f5f5f5' : 'white', cursor: currentPage === 1 ? 'default' : 'pointer', color: currentPage === 1 ? '#ccc' : '#333' }}
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      Previous
+                    </button>
+                    <span style={{ fontSize: '0.9rem', color: '#666' }}>
+                      Page {currentPage} of {Math.ceil(transactions.length / transactionsPerPage)} ({transactions.length} total)
+                    </span>
+                    <button
+                      style={{ padding: '0.4rem 0.8rem', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: currentPage >= Math.ceil(transactions.length / transactionsPerPage) ? '#f5f5f5' : 'white', cursor: currentPage >= Math.ceil(transactions.length / transactionsPerPage) ? 'default' : 'pointer', color: currentPage >= Math.ceil(transactions.length / transactionsPerPage) ? '#ccc' : '#333' }}
+                      onClick={() => setCurrentPage(p => Math.min(Math.ceil(transactions.length / transactionsPerPage), p + 1))}
+                      disabled={currentPage >= Math.ceil(transactions.length / transactionsPerPage)}
+                    >
+                      Next
+                    </button>
+                  </div>
                 )}
               </>
             ) : (
@@ -2013,32 +2127,59 @@ export default function Portfolio() {
           <div style={styles.tabContent}>
             <h2 style={styles.sectionTitle}>🏆 Top Performers</h2>
 
-            {/* Timeframe selector */}
-            <div style={perfStyles.timeframeBar}>
-              {[
-                { key: '1m', label: '1M' },
-                { key: '3m', label: '3M' },
-                { key: '6m', label: '6M' },
-                { key: 'ytd', label: 'YTD' },
-                { key: '1y', label: '1Y' },
-                { key: '3y', label: '3Y' },
-                { key: '5y', label: '5Y' },
-                { key: 'all', label: 'All Time' },
-              ].map((tf) => (
+            {/* Controls row */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
+              {/* Timeframe selector */}
+              <div style={{ ...perfStyles.timeframeBar, marginBottom: 0 }}>
+                {[
+                  { key: '1m', label: '1M' },
+                  { key: '3m', label: '3M' },
+                  { key: '6m', label: '6M' },
+                  { key: 'ytd', label: 'YTD' },
+                  { key: '1y', label: '1Y' },
+                  { key: '3y', label: '3Y' },
+                  { key: '5y', label: '5Y' },
+                  { key: 'all', label: 'All Time' },
+                ].map((tf) => (
+                  <button
+                    key={tf.key}
+                    style={{
+                      ...perfStyles.timeframeButton,
+                      ...(performanceTimeframe === tf.key ? perfStyles.timeframeButtonActive : {}),
+                    }}
+                    onClick={() => handleTimeframeChange(tf.key)}
+                  >
+                    {tf.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Market / My Return toggle */}
+              <div style={perfStyles.toggleContainer}>
                 <button
-                  key={tf.key}
                   style={{
-                    ...perfStyles.timeframeButton,
-                    ...(performanceTimeframe === tf.key ? perfStyles.timeframeButtonActive : {}),
+                    ...perfStyles.toggleButton,
+                    ...(returnMode === 'market' ? perfStyles.toggleButtonActive : {}),
+                    borderRadius: '20px 0 0 20px',
                   }}
-                  onClick={() => handleTimeframeChange(tf.key)}
+                  onClick={() => setReturnMode('market')}
                 >
-                  {tf.label}
+                  Market Return
                 </button>
-              ))}
+                <button
+                  style={{
+                    ...perfStyles.toggleButton,
+                    ...(returnMode === 'personal' ? perfStyles.toggleButtonActive : {}),
+                    borderRadius: '0 20px 20px 0',
+                  }}
+                  onClick={() => setReturnMode('personal')}
+                >
+                  My Return
+                </button>
+              </div>
             </div>
 
-            {performanceData && performanceData.tickers.length > 0 ? (
+            {perfView && perfView.tickers.length > 0 ? (
               <>
                 {/* Summary cards */}
                 <div style={styles.metricsGrid}>
@@ -2046,12 +2187,12 @@ export default function Portfolio() {
                     <div style={styles.metricLabel}>Portfolio Return</div>
                     <div style={{
                       ...styles.metricValue,
-                      color: performanceData.portfolio_period_return_pct != null
-                        ? performanceData.portfolio_period_return_pct >= 0 ? '#00cc88' : '#ff4444'
+                      color: perfView.portfolioReturnPct != null
+                        ? perfView.portfolioReturnPct >= 0 ? '#00cc88' : '#ff4444'
                         : '#333',
                     }}>
-                      {performanceData.portfolio_period_return_pct != null
-                        ? `${performanceData.portfolio_period_return_pct >= 0 ? '+' : ''}${performanceData.portfolio_period_return_pct.toFixed(2)}%`
+                      {perfView.portfolioReturnPct != null
+                        ? `${perfView.portfolioReturnPct >= 0 ? '+' : ''}${perfView.portfolioReturnPct.toFixed(2)}%`
                         : 'N/A'}
                     </div>
                   </div>
@@ -2059,51 +2200,68 @@ export default function Portfolio() {
                     <div style={styles.metricLabel}>Portfolio P/L</div>
                     <div style={{
                       ...styles.metricValue,
-                      color: performanceData.portfolio_period_dollar_change != null
-                        ? performanceData.portfolio_period_dollar_change >= 0 ? '#00cc88' : '#ff4444'
+                      color: perfView.portfolioDollarChange != null
+                        ? perfView.portfolioDollarChange >= 0 ? '#00cc88' : '#ff4444'
                         : '#333',
                     }}>
-                      {performanceData.portfolio_period_dollar_change != null
-                        ? formatCurrency(performanceData.portfolio_period_dollar_change)
+                      {perfView.portfolioDollarChange != null
+                        ? formatCurrency(perfView.portfolioDollarChange)
                         : 'N/A'}
                     </div>
                   </div>
                   {(() => {
-                    const best = performanceData.tickers.find((t) => t.period_return_pct != null);
+                    const best = perfView.tickers.find((t) => t.activeReturnPct != null);
                     return (
                       <div style={{ ...styles.metricCard, borderLeft: '4px solid #00cc88' }}>
                         <div style={styles.metricLabel}>Best Performer</div>
                         <div style={{ ...styles.metricValue, color: '#00cc88' }}>
-                          {best ? `${best.ticker} (${best.period_return_pct >= 0 ? '+' : ''}${best.period_return_pct.toFixed(1)}%)` : 'N/A'}
+                          {best ? `${best.ticker} (${best.activeReturnPct >= 0 ? '+' : ''}${best.activeReturnPct.toFixed(1)}%)` : 'N/A'}
                         </div>
                       </div>
                     );
                   })()}
                   {(() => {
-                    const withReturns = performanceData.tickers.filter((t) => t.period_return_pct != null);
+                    const withReturns = perfView.tickers.filter((t) => t.activeReturnPct != null);
                     const worst = withReturns.length > 0 ? withReturns[withReturns.length - 1] : null;
                     return (
                       <div style={{ ...styles.metricCard, borderLeft: '4px solid #ff4444' }}>
                         <div style={styles.metricLabel}>Worst Performer</div>
                         <div style={{ ...styles.metricValue, color: '#ff4444' }}>
-                          {worst ? `${worst.ticker} (${worst.period_return_pct >= 0 ? '+' : ''}${worst.period_return_pct.toFixed(1)}%)` : 'N/A'}
+                          {worst ? `${worst.ticker} (${worst.activeReturnPct >= 0 ? '+' : ''}${worst.activeReturnPct.toFixed(1)}%)` : 'N/A'}
                         </div>
                       </div>
                     );
                   })()}
+                  {benchmarkData && (
+                    <div style={{ ...styles.metricCard, borderLeft: '4px solid #17a2b8' }}>
+                      <div style={styles.metricLabel}>Benchmark ({benchmarkData.ticker})</div>
+                      <div style={{
+                        ...styles.metricValue,
+                        color: benchmarkData.return_pct != null
+                          ? benchmarkData.return_pct >= 0 ? '#00cc88' : '#ff4444'
+                          : '#333',
+                      }}>
+                        {benchmarkData.return_pct != null
+                          ? `${benchmarkData.return_pct >= 0 ? '+' : ''}${benchmarkData.return_pct.toFixed(2)}%`
+                          : 'N/A'}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Performance bar chart - % returns */}
                 <div style={styles.section}>
-                  <h3 style={styles.subsectionTitle}>Return by Ticker (%)</h3>
+                  <h3 style={styles.subsectionTitle}>
+                    {returnMode === 'personal' ? 'My Return by Ticker (%)' : 'Market Return by Ticker (%)'}
+                  </h3>
                   <div style={{ marginTop: '1rem' }}>
-                    <ResponsiveContainer width="100%" height={Math.max(300, performanceData.tickers.filter((t) => t.period_return_pct != null).length * 40)}>
+                    <ResponsiveContainer width="100%" height={Math.max(300, perfView.tickers.filter((t) => t.activeReturnPct != null).length * 40)}>
                       <BarChart
-                        data={performanceData.tickers
-                          .filter((t) => t.period_return_pct != null)
+                        data={perfView.tickers
+                          .filter((t) => t.activeReturnPct != null)
                           .map((t) => ({
                             ticker: t.ticker,
-                            return_pct: parseFloat(t.period_return_pct.toFixed(2)),
+                            return_pct: parseFloat(t.activeReturnPct.toFixed(2)),
                           }))}
                         layout="vertical"
                         margin={{ top: 5, right: 40, left: 60, bottom: 5 }}
@@ -2128,10 +2286,10 @@ export default function Portfolio() {
                         />
                         <ReferenceLine x={0} stroke="#999" strokeDasharray="3 3" />
                         <Bar dataKey="return_pct" name="Return %" radius={[0, 4, 4, 0]}>
-                          {performanceData.tickers
-                            .filter((t) => t.period_return_pct != null)
+                          {perfView.tickers
+                            .filter((t) => t.activeReturnPct != null)
                             .map((t, i) => (
-                              <Cell key={i} fill={t.period_return_pct >= 0 ? '#00cc88' : '#ff4444'} />
+                              <Cell key={i} fill={t.activeReturnPct >= 0 ? '#00cc88' : '#ff4444'} />
                             ))}
                         </Bar>
                       </BarChart>
@@ -2143,58 +2301,59 @@ export default function Portfolio() {
                 <div style={styles.section}>
                   <h3 style={styles.subsectionTitle}>Dollar Gain/Loss by Ticker</h3>
                   <div style={{ marginTop: '1rem' }}>
-                    <ResponsiveContainer width="100%" height={Math.max(300, performanceData.tickers.filter((t) => t.period_dollar_change != null).length * 40)}>
-                      <BarChart
-                        data={performanceData.tickers
-                          .filter((t) => t.period_dollar_change != null)
-                          .sort((a, b) => b.period_dollar_change - a.period_dollar_change)
-                          .map((t) => ({
-                            ticker: t.ticker,
-                            dollar_change: parseFloat(t.period_dollar_change.toFixed(2)),
-                          }))}
-                        layout="vertical"
-                        margin={{ top: 5, right: 40, left: 60, bottom: 5 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.2)" horizontal={false} />
-                        <XAxis
-                          type="number"
-                          stroke="#666"
-                          tick={{ fill: '#666', fontSize: 12 }}
-                          tickFormatter={(v) => `$${v >= 1000 || v <= -1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0)}`}
-                        />
-                        <YAxis
-                          type="category"
-                          dataKey="ticker"
-                          stroke="#666"
-                          tick={{ fill: '#333', fontSize: 13, fontWeight: 500 }}
-                          width={55}
-                        />
-                        <Tooltip
-                          formatter={(value) => [formatCurrency(value), 'Gain/Loss']}
-                          contentStyle={{ backgroundColor: 'rgba(255,255,255,0.95)', border: '1px solid #ccc', borderRadius: '4px' }}
-                        />
-                        <ReferenceLine x={0} stroke="#999" strokeDasharray="3 3" />
-                        <Bar dataKey="dollar_change" name="Gain/Loss" radius={[0, 4, 4, 0]}>
-                          {performanceData.tickers
-                            .filter((t) => t.period_dollar_change != null)
-                            .sort((a, b) => b.period_dollar_change - a.period_dollar_change)
-                            .map((t, i) => (
-                              <Cell key={i} fill={t.period_dollar_change >= 0 ? '#00cc88' : '#ff4444'} />
-                            ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
+                    {(() => {
+                      const sorted = perfView.tickers
+                        .filter((t) => t.activeDollarChange != null)
+                        .sort((a, b) => b.activeDollarChange - a.activeDollarChange);
+                      return (
+                        <ResponsiveContainer width="100%" height={Math.max(300, sorted.length * 40)}>
+                          <BarChart
+                            data={sorted.map((t) => ({
+                              ticker: t.ticker,
+                              dollar_change: parseFloat(t.activeDollarChange.toFixed(2)),
+                            }))}
+                            layout="vertical"
+                            margin={{ top: 5, right: 40, left: 60, bottom: 5 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.2)" horizontal={false} />
+                            <XAxis
+                              type="number"
+                              stroke="#666"
+                              tick={{ fill: '#666', fontSize: 12 }}
+                              tickFormatter={(v) => `$${v >= 1000 || v <= -1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0)}`}
+                            />
+                            <YAxis
+                              type="category"
+                              dataKey="ticker"
+                              stroke="#666"
+                              tick={{ fill: '#333', fontSize: 13, fontWeight: 500 }}
+                              width={55}
+                            />
+                            <Tooltip
+                              formatter={(value) => [formatCurrency(value), 'Gain/Loss']}
+                              contentStyle={{ backgroundColor: 'rgba(255,255,255,0.95)', border: '1px solid #ccc', borderRadius: '4px' }}
+                            />
+                            <ReferenceLine x={0} stroke="#999" strokeDasharray="3 3" />
+                            <Bar dataKey="dollar_change" name="Gain/Loss" radius={[0, 4, 4, 0]}>
+                              {sorted.map((t, i) => (
+                                <Cell key={i} fill={t.activeDollarChange >= 0 ? '#00cc88' : '#ff4444'} />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      );
+                    })()}
                   </div>
                 </div>
 
                 {/* Investment treemap */}
                 {(() => {
-                  const treemapData = performanceData.tickers
+                  const treemapData = perfView.tickers
                     .filter((t) => t.current_value != null && t.current_value > 0)
                     .map((t) => ({
                       name: t.ticker,
                       size: t.current_value,
-                      returnPct: t.period_return_pct,
+                      returnPct: t.activeReturnPct,
                     }));
                   if (treemapData.length === 0) return null;
 
@@ -2285,9 +2444,9 @@ export default function Portfolio() {
                 <div style={styles.section}>
                   <h3 style={styles.subsectionTitle}>Invested vs Current Value</h3>
                   <div style={{ marginTop: '1rem' }}>
-                    <ResponsiveContainer width="100%" height={Math.max(300, performanceData.tickers.filter((t) => t.current_value != null).length * 45)}>
+                    <ResponsiveContainer width="100%" height={Math.max(300, perfView.tickers.filter((t) => t.current_value != null).length * 45)}>
                       <BarChart
-                        data={performanceData.tickers
+                        data={perfView.tickers
                           .filter((t) => t.current_value != null)
                           .sort((a, b) => b.current_value - a.current_value)
                           .map((t) => ({
@@ -2334,37 +2493,47 @@ export default function Portfolio() {
                             { key: 'ticker', label: 'Ticker' },
                             { key: 'current_value', label: 'Current Value' },
                             { key: 'total_invested', label: 'Invested' },
-                            { key: 'period_return_pct', label: 'Period Return' },
-                            { key: 'period_dollar_change', label: 'Period P/L' },
-                            { key: 'all_time_return_pct', label: 'All-Time Return' },
-                            { key: 'all_time_dollar_change', label: 'All-Time P/L' },
+                            { key: 'period_return_pct', label: 'Market Return' },
+                            { key: 'period_dollar_change', label: 'Market P/L' },
+                            { key: 'all_time_return_pct', label: 'My Return' },
+                            { key: 'all_time_dollar_change', label: 'My P/L' },
                             { key: 'current_price', label: 'Price' },
                             { key: 'quantity', label: 'Shares' },
-                          ].map((col) => (
-                            <th
-                              key={col.key}
-                              style={{ ...styles.th, cursor: 'pointer', userSelect: 'none' }}
-                              onClick={() => {
-                                if (perfSortKey === col.key) {
-                                  setPerfSortDir(perfSortDir === 'asc' ? 'desc' : 'asc');
-                                } else {
-                                  setPerfSortKey(col.key);
-                                  setPerfSortDir(col.key === 'ticker' ? 'asc' : 'desc');
-                                }
-                              }}
-                            >
-                              {col.label}
-                              {perfSortKey === col.key && (
-                                <span style={{ marginLeft: '4px', fontSize: '0.7rem' }}>
-                                  {perfSortDir === 'asc' ? '▲' : '▼'}
-                                </span>
-                              )}
-                            </th>
-                          ))}
+                          ].map((col) => {
+                            const isActiveMode =
+                              (returnMode === 'market' && (col.key === 'period_return_pct' || col.key === 'period_dollar_change')) ||
+                              (returnMode === 'personal' && (col.key === 'all_time_return_pct' || col.key === 'all_time_dollar_change'));
+                            return (
+                              <th
+                                key={col.key}
+                                style={{
+                                  ...styles.th,
+                                  cursor: 'pointer',
+                                  userSelect: 'none',
+                                  backgroundColor: isActiveMode ? '#eef4ff' : undefined,
+                                }}
+                                onClick={() => {
+                                  if (perfSortKey === col.key) {
+                                    setPerfSortDir(perfSortDir === 'asc' ? 'desc' : 'asc');
+                                  } else {
+                                    setPerfSortKey(col.key);
+                                    setPerfSortDir(col.key === 'ticker' ? 'asc' : 'desc');
+                                  }
+                                }}
+                              >
+                                {col.label}
+                                {perfSortKey === col.key && (
+                                  <span style={{ marginLeft: '4px', fontSize: '0.7rem' }}>
+                                    {perfSortDir === 'asc' ? '▲' : '▼'}
+                                  </span>
+                                )}
+                              </th>
+                            );
+                          })}
                         </tr>
                       </thead>
                       <tbody>
-                        {[...performanceData.tickers]
+                        {[...perfView.tickers]
                           .sort((a, b) => {
                             const va = a[perfSortKey] ?? -Infinity;
                             const vb = b[perfSortKey] ?? -Infinity;
@@ -2373,60 +2542,69 @@ export default function Portfolio() {
                             }
                             return perfSortDir === 'asc' ? va - vb : vb - va;
                           })
-                          .map((t) => (
-                            <tr key={t.ticker} style={styles.tr}>
-                              <td style={styles.td}>
-                                <button style={styles.tickerButton} onClick={() => navigateToTicker(t.ticker)}>
-                                  {t.ticker}
-                                </button>
-                              </td>
-                              <td style={styles.td}>
-                                {t.current_value != null ? formatCurrency(t.current_value) : 'N/A'}
-                              </td>
-                              <td style={styles.td}>{formatCurrency(t.total_invested)}</td>
-                              <td style={{
-                                ...styles.td,
-                                fontWeight: 'bold',
-                                color: t.period_return_pct != null
-                                  ? t.period_return_pct >= 0 ? '#00cc88' : '#ff4444'
-                                  : undefined,
-                              }}>
-                                {t.period_return_pct != null
-                                  ? `${t.period_return_pct >= 0 ? '+' : ''}${t.period_return_pct.toFixed(2)}%`
-                                  : '—'}
-                              </td>
-                              <td style={{
-                                ...styles.td,
-                                color: t.period_dollar_change != null
-                                  ? t.period_dollar_change >= 0 ? '#00cc88' : '#ff4444'
-                                  : undefined,
-                              }}>
-                                {t.period_dollar_change != null ? formatCurrency(t.period_dollar_change) : '—'}
-                              </td>
-                              <td style={{
-                                ...styles.td,
-                                color: t.all_time_return_pct != null
-                                  ? t.all_time_return_pct >= 0 ? '#00cc88' : '#ff4444'
-                                  : undefined,
-                              }}>
-                                {t.all_time_return_pct != null
-                                  ? `${t.all_time_return_pct >= 0 ? '+' : ''}${t.all_time_return_pct.toFixed(2)}%`
-                                  : '—'}
-                              </td>
-                              <td style={{
-                                ...styles.td,
-                                color: t.all_time_dollar_change != null
-                                  ? t.all_time_dollar_change >= 0 ? '#00cc88' : '#ff4444'
-                                  : undefined,
-                              }}>
-                                {t.all_time_dollar_change != null ? formatCurrency(t.all_time_dollar_change) : '—'}
-                              </td>
-                              <td style={styles.td}>
-                                {t.current_price != null ? `$${t.current_price.toFixed(2)}` : 'N/A'}
-                              </td>
-                              <td style={styles.td}>{t.quantity.toFixed(4)}</td>
-                            </tr>
-                          ))}
+                          .map((t) => {
+                            const mktActive = returnMode === 'market';
+                            const myActive = returnMode === 'personal';
+                            return (
+                              <tr key={t.ticker} style={styles.tr}>
+                                <td style={styles.td}>
+                                  <button style={styles.tickerButton} onClick={() => navigateToTicker(t.ticker)}>
+                                    {t.ticker}
+                                  </button>
+                                </td>
+                                <td style={styles.td}>
+                                  {t.current_value != null ? formatCurrency(t.current_value) : 'N/A'}
+                                </td>
+                                <td style={styles.td}>{formatCurrency(t.total_invested)}</td>
+                                <td style={{
+                                  ...styles.td,
+                                  fontWeight: mktActive ? 'bold' : 'normal',
+                                  backgroundColor: mktActive ? '#f6f9ff' : undefined,
+                                  color: t.period_return_pct != null
+                                    ? t.period_return_pct >= 0 ? '#00cc88' : '#ff4444'
+                                    : undefined,
+                                }}>
+                                  {t.period_return_pct != null
+                                    ? `${t.period_return_pct >= 0 ? '+' : ''}${t.period_return_pct.toFixed(2)}%`
+                                    : '—'}
+                                </td>
+                                <td style={{
+                                  ...styles.td,
+                                  backgroundColor: mktActive ? '#f6f9ff' : undefined,
+                                  color: t.period_dollar_change != null
+                                    ? t.period_dollar_change >= 0 ? '#00cc88' : '#ff4444'
+                                    : undefined,
+                                }}>
+                                  {t.period_dollar_change != null ? formatCurrency(t.period_dollar_change) : '—'}
+                                </td>
+                                <td style={{
+                                  ...styles.td,
+                                  fontWeight: myActive ? 'bold' : 'normal',
+                                  backgroundColor: myActive ? '#f6f9ff' : undefined,
+                                  color: t.all_time_return_pct != null
+                                    ? t.all_time_return_pct >= 0 ? '#00cc88' : '#ff4444'
+                                    : undefined,
+                                }}>
+                                  {t.all_time_return_pct != null
+                                    ? `${t.all_time_return_pct >= 0 ? '+' : ''}${t.all_time_return_pct.toFixed(2)}%`
+                                    : '—'}
+                                </td>
+                                <td style={{
+                                  ...styles.td,
+                                  backgroundColor: myActive ? '#f6f9ff' : undefined,
+                                  color: t.all_time_dollar_change != null
+                                    ? t.all_time_dollar_change >= 0 ? '#00cc88' : '#ff4444'
+                                    : undefined,
+                                }}>
+                                  {t.all_time_dollar_change != null ? formatCurrency(t.all_time_dollar_change) : '—'}
+                                </td>
+                                <td style={styles.td}>
+                                  {t.current_price != null ? `$${t.current_price.toFixed(2)}` : 'N/A'}
+                                </td>
+                                <td style={styles.td}>{t.quantity.toFixed(4)}</td>
+                              </tr>
+                            );
+                          })}
                       </tbody>
                     </table>
                   </div>
@@ -2586,6 +2764,7 @@ function TransactionForm({ formData, setFormData, onSubmit, onCancel }) {
             >
               <option value="BUY">BUY</option>
               <option value="SELL">SELL</option>
+              <option value="DIVIDEND">DIVIDEND</option>
             </select>
           </label>
         </div>
@@ -2732,6 +2911,7 @@ function TransactionEditForm({ transaction, onSave, onCancel }) {
             >
               <option value="BUY">BUY</option>
               <option value="SELL">SELL</option>
+              <option value="DIVIDEND">DIVIDEND</option>
             </select>
           </label>
         </div>
@@ -3440,6 +3620,25 @@ const perfStyles = {
     transition: 'all 0.2s',
   },
   timeframeButtonActive: {
+    backgroundColor: '#007bff',
+    color: '#fff',
+    borderColor: '#007bff',
+  },
+  toggleContainer: {
+    display: 'flex',
+    flexShrink: 0,
+  },
+  toggleButton: {
+    padding: '0.5rem 1.1rem',
+    backgroundColor: '#f0f0f0',
+    border: '1px solid #ddd',
+    cursor: 'pointer',
+    fontSize: '0.85rem',
+    fontWeight: '500',
+    color: '#555',
+    transition: 'all 0.2s',
+  },
+  toggleButtonActive: {
     backgroundColor: '#007bff',
     color: '#fff',
     borderColor: '#007bff',

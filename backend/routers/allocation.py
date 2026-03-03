@@ -6,8 +6,10 @@ from backend.database import get_db
 from backend.models import (
     AssetAllocationTarget as AssetAllocationTargetModel,
     TickerCategory as TickerCategoryModel,
-    PortfolioTransaction as PortfolioTransactionModel
+    PortfolioTransaction as PortfolioTransactionModel,
+    User,
 )
+from backend.routers.auth import get_current_user
 from backend.schemas import (
     AssetAllocationTarget,
     AssetAllocationTargetCreate,
@@ -203,7 +205,7 @@ def get_or_create_ticker_category(ticker: str, db: Session) -> TickerCategoryMod
 
 # Allocation Targets Endpoints
 @router.get("/targets", response_model=List[AssetAllocationTarget])
-def get_allocation_targets(db: Session = Depends(get_db)):
+def get_allocation_targets(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get all asset allocation targets"""
     targets = db.query(AssetAllocationTargetModel).all()
     return targets
@@ -213,7 +215,8 @@ def get_allocation_targets(db: Session = Depends(get_db)):
 def update_allocation_target(
     category: str,
     target_update: AssetAllocationTargetUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Update an asset allocation target"""
     target = db.query(AssetAllocationTargetModel).filter(
@@ -238,7 +241,8 @@ def update_allocation_target(
 @router.post("/targets", response_model=AssetAllocationTarget, status_code=status.HTTP_201_CREATED)
 def create_allocation_target(
     target_create: AssetAllocationTargetCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Create a new asset allocation target"""
     # Check if category already exists
@@ -262,7 +266,7 @@ def create_allocation_target(
 
 # Ticker Category Endpoints
 @router.get("/ticker-categories", response_model=List[TickerCategory])
-def get_ticker_categories(db: Session = Depends(get_db)):
+def get_ticker_categories(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get all ticker category mappings with ticker names"""
     categories = db.query(TickerCategoryModel).all()
     
@@ -285,7 +289,7 @@ def get_ticker_categories(db: Session = Depends(get_db)):
 
 
 @router.get("/ticker-categories/{ticker}", response_model=TickerCategory)
-def get_ticker_category(ticker: str, db: Session = Depends(get_db)):
+def get_ticker_category(ticker: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get or auto-create category for a specific ticker"""
     ticker = ticker.upper()
     category = get_or_create_ticker_category(ticker, db)
@@ -296,7 +300,8 @@ def get_ticker_category(ticker: str, db: Session = Depends(get_db)):
 def update_ticker_category(
     ticker: str,
     category_update: TickerCategoryUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Update ticker category (manual override)"""
     ticker = ticker.upper()
@@ -327,7 +332,7 @@ def update_ticker_category(
 
 
 @router.post("/ticker-categories/recategorize/{ticker}", response_model=TickerCategory)
-def recategorize_ticker(ticker: str, db: Session = Depends(get_db)):
+def recategorize_ticker(ticker: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Force re-categorization of a ticker using auto-detection"""
     ticker = ticker.upper()
     
@@ -355,7 +360,7 @@ def recategorize_ticker(ticker: str, db: Session = Depends(get_db)):
 
 # Main Allocation Summary Endpoint
 @router.get("/summary", response_model=AssetAllocationSummary)
-def get_allocation_summary(db: Session = Depends(get_db)):
+def get_allocation_summary(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get complete asset allocation summary with target vs actual comparison"""
     
     # Get all targets

@@ -8,8 +8,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models import InvestmentAccount, AccountSnapshot, PortfolioAggregateSnapshot
+from backend.models import InvestmentAccount, AccountSnapshot, PortfolioAggregateSnapshot, User
 from backend import schemas
+from backend.routers.auth import get_current_user
 
 router = APIRouter(prefix="/fire", tags=["fire"])
 
@@ -41,6 +42,7 @@ def list_accounts(
     owner: Optional[str] = None,
     account_type: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     query = db.query(InvestmentAccount)
     if owner:
@@ -55,6 +57,7 @@ def list_accounts(
 def create_account(
     data: schemas.InvestmentAccountCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     account = InvestmentAccount(
         name=data.name,
@@ -85,6 +88,7 @@ def update_account(
     account_id: int,
     data: schemas.InvestmentAccountUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     account = db.query(InvestmentAccount).filter(InvestmentAccount.id == account_id).first()
     if not account:
@@ -98,7 +102,7 @@ def update_account(
 
 
 @router.delete("/accounts/{account_id}")
-def delete_account(account_id: int, db: Session = Depends(get_db)):
+def delete_account(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     account = db.query(InvestmentAccount).filter(InvestmentAccount.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
@@ -226,6 +230,7 @@ def _parse_monarch_text(text: str) -> list[dict]:
 def bulk_import_accounts(
     data: schemas.BulkAccountImport,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     parsed = _parse_monarch_text(data.text)
     snap_date = data.snapshot_date or date.today()
@@ -287,7 +292,7 @@ def bulk_import_accounts(
 # ---------------------------------------------------------------------------
 
 @router.get("/accounts/{account_id}/snapshots", response_model=List[schemas.AccountSnapshot])
-def list_snapshots(account_id: int, db: Session = Depends(get_db)):
+def list_snapshots(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     account = db.query(InvestmentAccount).filter(InvestmentAccount.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
@@ -298,6 +303,7 @@ def list_snapshots(account_id: int, db: Session = Depends(get_db)):
 def bulk_create_snapshots(
     data: schemas.BulkSnapshotCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     created = []
     for entry in data.entries:
@@ -323,6 +329,7 @@ def update_snapshot(
     snapshot_id: int,
     data: schemas.AccountSnapshotUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     snap = db.query(AccountSnapshot).filter(AccountSnapshot.id == snapshot_id).first()
     if not snap:
@@ -335,7 +342,7 @@ def update_snapshot(
 
 
 @router.delete("/snapshots/{snapshot_id}")
-def delete_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
+def delete_snapshot(snapshot_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     snap = db.query(AccountSnapshot).filter(AccountSnapshot.id == snapshot_id).first()
     if not snap:
         raise HTTPException(status_code=404, detail="Snapshot not found")
@@ -349,7 +356,7 @@ def delete_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/dashboard", response_model=schemas.FireDashboard)
-def get_dashboard(db: Session = Depends(get_db)):
+def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     accounts = db.query(InvestmentAccount).filter(InvestmentAccount.is_active == True).all()
 
     total_value = 0.0
@@ -532,17 +539,16 @@ def _generate_boundaries(start: date, end: date, interval: str) -> list[date]:
     elif interval == "quarterly":
         quarter_ends = [(3, 31), (6, 30), (9, 30), (12, 31)]
         y = start.year
-        while True:
+        done = False
+        while not done:
             for qm, qd in quarter_ends:
                 qdate = date(y, qm, qd)
                 if qdate > end:
+                    done = True
                     break
                 if qdate > start and qdate not in boundaries:
                     boundaries.append(qdate)
-            else:
-                y += 1
-                continue
-            break
+            y += 1
     elif interval == "yearly":
         y = start.year
         while True:
@@ -563,6 +569,7 @@ def get_income_history(
     interval: str = Query("quarterly", regex="^(monthly|quarterly|yearly)$"),
     account_ids: Optional[str] = Query(None, description="Comma-separated account IDs to filter by"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Compute investment income over standard calendar intervals by interpolating
@@ -626,7 +633,7 @@ def get_income_history(
 # ---------------------------------------------------------------------------
 
 @router.get("/aggregate-snapshots", response_model=List[schemas.PortfolioAggregateSnapshot])
-def list_aggregate_snapshots(db: Session = Depends(get_db)):
+def list_aggregate_snapshots(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     return (
         db.query(PortfolioAggregateSnapshot)
         .order_by(PortfolioAggregateSnapshot.snapshot_date.desc())
@@ -638,6 +645,7 @@ def list_aggregate_snapshots(db: Session = Depends(get_db)):
 def create_aggregate_snapshot(
     data: schemas.PortfolioAggregateSnapshotCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     existing = (
         db.query(PortfolioAggregateSnapshot)
@@ -669,6 +677,7 @@ def update_aggregate_snapshot(
     snapshot_id: int,
     data: schemas.PortfolioAggregateSnapshotUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     snap = db.query(PortfolioAggregateSnapshot).filter(PortfolioAggregateSnapshot.id == snapshot_id).first()
     if not snap:
@@ -681,7 +690,7 @@ def update_aggregate_snapshot(
 
 
 @router.delete("/aggregate-snapshots/{snapshot_id}")
-def delete_aggregate_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
+def delete_aggregate_snapshot(snapshot_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     snap = db.query(PortfolioAggregateSnapshot).filter(PortfolioAggregateSnapshot.id == snapshot_id).first()
     if not snap:
         raise HTTPException(status_code=404, detail="Aggregate snapshot not found")

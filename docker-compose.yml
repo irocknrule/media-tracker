@@ -9,7 +9,7 @@ services:
       - OMDB_API_KEY=${OMDB_API_KEY:-}
       - LASTFM_API_KEY=${LASTFM_API_KEY:-}
     volumes:
-      - ./data:/app/data
+      - ${DATA_DIR:-./data}:/app/data
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
     healthcheck:

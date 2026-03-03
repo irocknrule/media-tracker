@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { fireService } from '../services/fireService';
+import { portfolioService } from '../services/portfolioService';
 import { getErrorMessage } from '../utils/errorHandler';
+import { formatCurrency, formatCurrencyPrecise, formatPercent } from '../utils/formatters';
+import ConfirmModal from '../components/ConfirmModal';
 import {
   AreaChart,
   Area,
@@ -33,7 +36,19 @@ const ACCOUNT_TYPE_LABELS = {
 export default function Fire() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('accounts');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'accounts';
+  const setActiveTab = (tab) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (tab === 'accounts') {
+        next.delete('tab');
+      } else {
+        next.set('tab', tab);
+      }
+      return next;
+    });
+  };
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -87,6 +102,7 @@ export default function Fire() {
     swr: 4,
     currentAge: 35,
     targetAge: 65,
+    inflationRate: 3,
   });
   const [scenarios, setScenarios] = useState([
     { id: 1, growthRate: 6, swr: 4, annualExpenses: 80000 },
@@ -213,22 +229,29 @@ export default function Fire() {
     }
   };
 
-  const handleDeleteAccount = async (id) => {
-    if (!window.confirm('Delete this account and all its snapshots?')) return;
-    try {
-      setLoading(true);
-      await fireService.deleteAccount(id);
-      if (expandedAccountId === id) {
-        setExpandedAccountId(null);
-        setAccountSnapshots([]);
-      }
-      loadAccounts();
-      loadDashboard();
-    } catch (err) {
-      setError(getErrorMessage(err) || 'Failed to delete account');
-    } finally {
-      setLoading(false);
-    }
+  const handleDeleteAccount = (id) => {
+    setConfirmModal({
+      title: 'Delete Account',
+      message: 'Delete this account and all its snapshots? This cannot be undone.',
+      danger: true,
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          setLoading(true);
+          await fireService.deleteAccount(id);
+          if (expandedAccountId === id) {
+            setExpandedAccountId(null);
+            setAccountSnapshots([]);
+          }
+          loadAccounts();
+          loadDashboard();
+        } catch (err) {
+          setError(getErrorMessage(err) || 'Failed to delete account');
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
   };
 
   const toggleSnapshots = async (accountId) => {
@@ -246,17 +269,24 @@ export default function Fire() {
     }
   };
 
-  const handleDeleteSnapshot = async (snapshotId, accountId) => {
-    if (!window.confirm('Delete this snapshot?')) return;
-    try {
-      await fireService.deleteSnapshot(snapshotId);
-      const snaps = await fireService.getSnapshots(accountId);
-      setAccountSnapshots(snaps);
-      loadAccounts();
-      loadDashboard();
-    } catch (err) {
-      setError(getErrorMessage(err) || 'Failed to delete snapshot');
-    }
+  const handleDeleteSnapshot = (snapshotId, accountId) => {
+    setConfirmModal({
+      title: 'Delete Snapshot',
+      message: 'Delete this snapshot?',
+      danger: true,
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          await fireService.deleteSnapshot(snapshotId);
+          const snaps = await fireService.getSnapshots(accountId);
+          setAccountSnapshots(snaps);
+          loadAccounts();
+          loadDashboard();
+        } catch (err) {
+          setError(getErrorMessage(err) || 'Failed to delete snapshot');
+        }
+      },
+    });
   };
 
   const handleBulkImport = async () => {
@@ -337,15 +367,22 @@ export default function Fire() {
     }
   };
 
-  const handleDeleteAggSnapshot = async (id) => {
-    if (!window.confirm('Delete this aggregate snapshot?')) return;
-    try {
-      await fireService.deleteAggregateSnapshot(id);
-      loadAggSnapshots();
-      loadDashboard();
-    } catch (err) {
-      setError(getErrorMessage(err) || 'Failed to delete aggregate snapshot');
-    }
+  const handleDeleteAggSnapshot = (id) => {
+    setConfirmModal({
+      title: 'Delete Snapshot',
+      message: 'Delete this aggregate snapshot?',
+      danger: true,
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          await fireService.deleteAggregateSnapshot(id);
+          loadAggSnapshots();
+          loadDashboard();
+        } catch (err) {
+          setError(getErrorMessage(err) || 'Failed to delete aggregate snapshot');
+        }
+      },
+    });
   };
 
   const openSnapshotModal = () => {
@@ -373,49 +410,72 @@ export default function Fire() {
     setScenarios(scenarios.map(s => s.id === id ? { ...s, [field]: parseFloat(value) || 0 } : s));
   };
 
-  // Formatting helpers
-  const formatCurrency = (value) => {
-    if (value === null || value === undefined) return 'N/A';
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
+  // Confirm modal state
+  const [confirmModal, setConfirmModal] = useState(null);
+
+  // Snapshot editing state
+  const [editingSnapshot, setEditingSnapshot] = useState(null);
+
+  const handleEditSnapshot = async (snap) => {
+    if (!editingSnapshot) {
+      setEditingSnapshot({ ...snap });
+      return;
+    }
+    try {
+      await fireService.updateSnapshot(editingSnapshot.id, {
+        balance: parseFloat(editingSnapshot.balance),
+        contributions_since_last: parseFloat(editingSnapshot.contributions_since_last || 0),
+        notes: editingSnapshot.notes || null,
+      });
+      const snaps = await fireService.getSnapshots(editingSnapshot.account_id);
+      setAccountSnapshots(snaps);
+      setEditingSnapshot(null);
+      loadAccounts();
+      loadDashboard();
+    } catch (err) {
+      setError(getErrorMessage(err) || 'Failed to update snapshot');
+    }
   };
 
-  const formatCurrencyPrecise = (value) => {
-    if (value === null || value === undefined) return 'N/A';
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-  };
-
-  const formatPercent = (value) => {
-    if (value === null || value === undefined) return 'N/A';
-    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+  // Sync current value from portfolio
+  const handleSyncFromPortfolio = async () => {
+    try {
+      setLoading(true);
+      const summary = await portfolioService.getSummary();
+      if (summary.current_value != null) {
+        setProjParams(prev => ({ ...prev, currentValue: summary.current_value }));
+      } else if (summary.total_invested) {
+        setProjParams(prev => ({ ...prev, currentValue: summary.total_invested }));
+      }
+    } catch (err) {
+      setError('Could not fetch portfolio value. Make sure you have portfolio data.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Projection calculations
   const projectionData = useMemo(() => {
-    const { currentValue, annualContribution, growthRate } = projParams;
+    const { currentValue, annualContribution, growthRate, inflationRate } = projParams;
     const r = growthRate / 100;
+    const inf = (inflationRate || 0) / 100;
     const years = 50;
     const data = [];
     let portfolio = currentValue;
+    let portfolioReal = currentValue;
 
     for (let y = 0; y <= years; y++) {
       const investmentIncome = y === 0 ? 0 : portfolio * r;
+      const realGrowth = y === 0 ? 0 : portfolioReal * ((1 + r) / (1 + inf) - 1);
       if (y > 0) {
         portfolio = portfolio + investmentIncome + annualContribution;
+        portfolioReal = portfolioReal + realGrowth + annualContribution / Math.pow(1 + inf, y);
       }
       data.push({
         year: y,
         age: projParams.currentAge + y,
         portfolio: Math.round(portfolio),
+        portfolioReal: Math.round(portfolioReal),
         investmentIncome: Math.round(investmentIncome),
         withdrawalCapacity4: Math.round(portfolio * 0.04),
         withdrawalCapacity3_5: Math.round(portfolio * 0.035),
@@ -430,6 +490,15 @@ export default function Fire() {
     const fireNumber = annualExpenses / (swr / 100);
     const gap = fireNumber - currentValue;
     const r = growthRate / 100;
+    const progressPct = fireNumber > 0 ? Math.min(100, (currentValue / fireNumber) * 100) : 0;
+
+    // Coast FIRE: portfolio that grows to FIRE number by targetAge without contributions
+    const yearsToTarget = Math.max(0, projParams.targetAge - projParams.currentAge);
+    const coastFireNumber = r > 0 ? fireNumber / Math.pow(1 + r, yearsToTarget) : fireNumber;
+    const coastFireReached = currentValue >= coastFireNumber;
+
+    // Barista FIRE: covers half expenses from portfolio, work for the rest
+    const baristaFireNumber = (annualExpenses * 0.5) / (swr / 100);
 
     let yearsToFire = null;
     if (currentValue >= fireNumber) {
@@ -448,7 +517,59 @@ export default function Fire() {
     const monthlyIncomeAtFire = fireNumber * (swr / 100) / 12;
     const currentAnnualIncome = currentValue * (growthRate / 100);
 
-    return { fireNumber, gap, yearsToFire, monthlyIncomeAtFire, currentAnnualIncome };
+    return {
+      fireNumber, gap, yearsToFire, monthlyIncomeAtFire, currentAnnualIncome,
+      progressPct, coastFireNumber, coastFireReached, baristaFireNumber,
+    };
+  }, [projParams]);
+
+  // Monte Carlo simulation
+  const monteCarloResults = useMemo(() => {
+    const { currentValue, annualContribution, growthRate, annualExpenses, swr } = projParams;
+    const fireNumber = annualExpenses / (swr / 100);
+    const meanReturn = growthRate / 100;
+    const stdDev = 0.16; // historical S&P 500 annual std dev
+    const simulations = 1000;
+    const years = 30;
+    const results = [];
+
+    const boxMuller = () => {
+      let u = 0, v = 0;
+      while (u === 0) u = Math.random();
+      while (v === 0) v = Math.random();
+      return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    };
+
+    for (let s = 0; s < simulations; s++) {
+      let portfolio = currentValue;
+      let reachedFire = false;
+      const path = [portfolio];
+      for (let y = 1; y <= years; y++) {
+        const annualReturn = meanReturn + stdDev * boxMuller();
+        portfolio = portfolio * (1 + annualReturn) + annualContribution;
+        if (portfolio < 0) portfolio = 0;
+        path.push(Math.round(portfolio));
+        if (portfolio >= fireNumber) reachedFire = true;
+      }
+      results.push({ path, reachedFire, finalValue: portfolio });
+    }
+
+    const successCount = results.filter(r => r.reachedFire).length;
+    const successRate = (successCount / simulations) * 100;
+
+    const percentiles = [10, 25, 50, 75, 90];
+    const percentileData = [];
+    for (let y = 0; y <= years; y++) {
+      const yearValues = results.map(r => r.path[y]).sort((a, b) => a - b);
+      const entry = { year: y, age: projParams.currentAge + y };
+      percentiles.forEach(p => {
+        const idx = Math.floor((p / 100) * yearValues.length);
+        entry[`p${p}`] = yearValues[Math.min(idx, yearValues.length - 1)];
+      });
+      percentileData.push(entry);
+    }
+
+    return { successRate, percentileData, simulations };
   }, [projParams]);
 
   const scenarioResults = useMemo(() => {
@@ -493,6 +614,16 @@ export default function Fire() {
 
   return (
     <div style={styles.container}>
+      {confirmModal && (
+        <ConfirmModal
+          title={confirmModal.title}
+          message={confirmModal.message}
+          danger={confirmModal.danger}
+          confirmLabel={confirmModal.confirmLabel || 'Delete'}
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
+      )}
       <header style={styles.header}>
         <div style={styles.headerLeft}>
           <button onClick={() => navigate('/')} style={styles.homeButton} title="Go to Home">
@@ -1006,17 +1137,48 @@ export default function Fire() {
                                             {accountSnapshots.map(snap => (
                                               <tr key={snap.id}>
                                                 <td style={styles.tdSm}>{snap.snapshot_date}</td>
-                                                <td style={{ ...styles.tdSm, textAlign: 'right' }}>{formatCurrencyPrecise(snap.balance)}</td>
-                                                <td style={{ ...styles.tdSm, textAlign: 'right' }}>{snap.contributions_since_last ? formatCurrencyPrecise(snap.contributions_since_last) : '-'}</td>
-                                                <td style={styles.tdSm}>{snap.notes || '-'}</td>
+                                                <td style={{ ...styles.tdSm, textAlign: 'right' }}>
+                                                  {editingSnapshot?.id === snap.id ? (
+                                                    <input style={styles.inputSmall} type="number" step="0.01" value={editingSnapshot.balance}
+                                                      onChange={e => setEditingSnapshot({ ...editingSnapshot, balance: e.target.value })} />
+                                                  ) : formatCurrencyPrecise(snap.balance)}
+                                                </td>
+                                                <td style={{ ...styles.tdSm, textAlign: 'right' }}>
+                                                  {editingSnapshot?.id === snap.id ? (
+                                                    <input style={styles.inputSmall} type="number" step="0.01" value={editingSnapshot.contributions_since_last || ''}
+                                                      onChange={e => setEditingSnapshot({ ...editingSnapshot, contributions_since_last: e.target.value })} />
+                                                  ) : snap.contributions_since_last ? formatCurrencyPrecise(snap.contributions_since_last) : '-'}
+                                                </td>
                                                 <td style={styles.tdSm}>
-                                                  <button
-                                                    style={styles.iconBtn}
-                                                    onClick={() => handleDeleteSnapshot(snap.id, a.id)}
-                                                    title="Delete snapshot"
-                                                  >
-                                                    🗑️
-                                                  </button>
+                                                  {editingSnapshot?.id === snap.id ? (
+                                                    <input style={styles.inputSmall} value={editingSnapshot.notes || ''}
+                                                      onChange={e => setEditingSnapshot({ ...editingSnapshot, notes: e.target.value })} />
+                                                  ) : snap.notes || '-'}
+                                                </td>
+                                                <td style={styles.tdSm}>
+                                                  {editingSnapshot?.id === snap.id ? (
+                                                    <>
+                                                      <button style={styles.iconBtn} onClick={() => handleEditSnapshot(snap)} title="Save">
+                                                        💾
+                                                      </button>
+                                                      <button style={styles.iconBtn} onClick={() => setEditingSnapshot(null)} title="Cancel">
+                                                        ✖️
+                                                      </button>
+                                                    </>
+                                                  ) : (
+                                                    <>
+                                                      <button style={styles.iconBtn} onClick={() => setEditingSnapshot({ ...snap })} title="Edit snapshot">
+                                                        ✏️
+                                                      </button>
+                                                      <button
+                                                        style={styles.iconBtn}
+                                                        onClick={() => handleDeleteSnapshot(snap.id, a.id)}
+                                                        title="Delete snapshot"
+                                                      >
+                                                        🗑️
+                                                      </button>
+                                                    </>
+                                                  )}
                                                 </td>
                                               </tr>
                                             ))}
@@ -1266,7 +1428,12 @@ export default function Fire() {
 
               {/* Input Parameters */}
               <div style={styles.formCard}>
-                <h3 style={styles.subsectionTitle}>Parameters</h3>
+                <div style={styles.sectionHeader}>
+                  <h3 style={styles.subsectionTitle}>Parameters</h3>
+                  <button style={styles.secondaryButton} onClick={handleSyncFromPortfolio} disabled={loading}>
+                    {loading ? 'Syncing...' : 'Sync Value from Portfolio'}
+                  </button>
+                </div>
                 <div style={styles.formGrid}>
                   <div>
                     <label style={styles.label}>Current Portfolio Value ($)</label>
@@ -1298,12 +1465,27 @@ export default function Fire() {
                       onChange={e => setProjParams({ ...projParams, growthRate: parseFloat(e.target.value) || 0 })}
                     />
                     <input
-                      type="range"
-                      min="0"
-                      max="15"
-                      step="0.5"
+                      type="range" min="0" max="15" step="0.5"
                       value={projParams.growthRate}
                       onChange={e => setProjParams({ ...projParams, growthRate: parseFloat(e.target.value) })}
+                      style={{ width: '100%', marginTop: '0.25rem' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={styles.label}>Inflation Rate (%)</label>
+                    <input
+                      style={styles.input}
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="15"
+                      value={projParams.inflationRate}
+                      onChange={e => setProjParams({ ...projParams, inflationRate: parseFloat(e.target.value) || 0 })}
+                    />
+                    <input
+                      type="range" min="0" max="8" step="0.5"
+                      value={projParams.inflationRate}
+                      onChange={e => setProjParams({ ...projParams, inflationRate: parseFloat(e.target.value) })}
                       style={{ width: '100%', marginTop: '0.25rem' }}
                     />
                   </div>
@@ -1328,10 +1510,7 @@ export default function Fire() {
                       onChange={e => setProjParams({ ...projParams, swr: parseFloat(e.target.value) || 4 })}
                     />
                     <input
-                      type="range"
-                      min="2"
-                      max="6"
-                      step="0.25"
+                      type="range" min="2" max="6" step="0.25"
                       value={projParams.swr}
                       onChange={e => setProjParams({ ...projParams, swr: parseFloat(e.target.value) })}
                       style={{ width: '100%', marginTop: '0.25rem' }}
@@ -1346,6 +1525,47 @@ export default function Fire() {
                       onChange={e => setProjParams({ ...projParams, currentAge: parseInt(e.target.value) || 30 })}
                     />
                   </div>
+                  <div>
+                    <label style={styles.label}>Target Retirement Age</label>
+                    <input
+                      style={styles.input}
+                      type="number"
+                      value={projParams.targetAge}
+                      onChange={e => setProjParams({ ...projParams, targetAge: parseInt(e.target.value) || 65 })}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* FIRE Progress Bar (C5) */}
+              <div style={{ marginBottom: '1.5rem', backgroundColor: '#f8f9fa', borderRadius: '8px', padding: '1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ fontWeight: '600', color: '#333' }}>Progress to FIRE</span>
+                  <span style={{ fontWeight: '700', color: fireMetrics.progressPct >= 100 ? '#28a745' : '#007bff' }}>
+                    {fireMetrics.progressPct.toFixed(1)}%
+                  </span>
+                </div>
+                <div style={{ backgroundColor: '#e9ecef', borderRadius: '8px', height: '24px', position: 'relative', overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${Math.min(100, fireMetrics.progressPct)}%`,
+                    height: '100%',
+                    backgroundColor: fireMetrics.progressPct >= 100 ? '#28a745' : '#007bff',
+                    borderRadius: '8px',
+                    transition: 'width 0.5s ease',
+                  }} />
+                  {[25, 50, 75].map(mark => (
+                    <div key={mark} style={{
+                      position: 'absolute', top: 0, left: `${mark}%`, width: '1px', height: '100%',
+                      backgroundColor: 'rgba(0,0,0,0.15)',
+                    }} />
+                  ))}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem', fontSize: '0.78rem', color: '#888' }}>
+                  <span>$0</span>
+                  <span>{formatCurrency(fireMetrics.fireNumber * 0.25)}</span>
+                  <span>{formatCurrency(fireMetrics.fireNumber * 0.5)}</span>
+                  <span>{formatCurrency(fireMetrics.fireNumber * 0.75)}</span>
+                  <span>{formatCurrency(fireMetrics.fireNumber)}</span>
                 </div>
               </div>
 
@@ -1385,6 +1605,33 @@ export default function Fire() {
                 </div>
               </div>
 
+              {/* Milestone Cards */}
+              <div style={{ ...styles.metricsGrid, marginBottom: '2rem' }}>
+                <div style={{ ...styles.metricCard, borderLeft: `4px solid ${fireMetrics.coastFireReached ? '#28a745' : '#6c757d'}` }}>
+                  <div style={styles.metricLabel}>Coast FIRE</div>
+                  <div style={styles.metricValue}>
+                    {fireMetrics.coastFireReached ? 'Reached!' : formatCurrency(fireMetrics.coastFireNumber)}
+                  </div>
+                  <div style={styles.metricSub}>
+                    No contributions needed by age {projParams.targetAge}
+                  </div>
+                </div>
+                <div style={{ ...styles.metricCard, borderLeft: `4px solid ${projParams.currentValue >= fireMetrics.baristaFireNumber ? '#28a745' : '#fd7e14'}` }}>
+                  <div style={styles.metricLabel}>Barista FIRE</div>
+                  <div style={styles.metricValue}>
+                    {projParams.currentValue >= fireMetrics.baristaFireNumber ? 'Reached!' : formatCurrency(fireMetrics.baristaFireNumber)}
+                  </div>
+                  <div style={styles.metricSub}>50% expenses from portfolio</div>
+                </div>
+                <div style={{ ...styles.metricCard, borderLeft: '4px solid #17a2b8' }}>
+                  <div style={styles.metricLabel}>Monte Carlo Success Rate</div>
+                  <div style={{ ...styles.metricValue, color: monteCarloResults.successRate >= 80 ? '#28a745' : monteCarloResults.successRate >= 50 ? '#ffc107' : '#dc3545' }}>
+                    {monteCarloResults.successRate.toFixed(0)}%
+                  </div>
+                  <div style={styles.metricSub}>{monteCarloResults.simulations} simulations over 30 years</div>
+                </div>
+              </div>
+
               {/* Projection Chart */}
               <div style={{ marginBottom: '2rem' }}>
                 <h3 style={styles.subsectionTitle}>Portfolio Growth Projection</h3>
@@ -1401,10 +1648,9 @@ export default function Fire() {
                     <Tooltip
                       formatter={(value, name) => {
                         const labels = {
-                          portfolio: 'Portfolio Value',
+                          portfolio: 'Portfolio (Nominal)',
+                          portfolioReal: 'Portfolio (Inflation-Adjusted)',
                           investmentIncome: 'Annual Investment Income',
-                          withdrawalCapacity4: 'Withdrawal @ 4% SWR',
-                          withdrawalCapacity3_5: 'Withdrawal @ 3.5% SWR',
                         };
                         return [formatCurrency(value), labels[name] || name];
                       }}
@@ -1417,6 +1663,12 @@ export default function Fire() {
                       strokeDasharray="5 5"
                       label={{ value: `FIRE: ${formatCurrency(fireMetrics.fireNumber)}`, position: 'right', fill: '#dc3545' }}
                     />
+                    <ReferenceLine
+                      x={projParams.targetAge}
+                      stroke="#6f42c1"
+                      strokeDasharray="4 4"
+                      label={{ value: `Target: ${projParams.targetAge}`, position: 'top', fill: '#6f42c1' }}
+                    />
                     <Area
                       type="monotone"
                       dataKey="portfolio"
@@ -1425,6 +1677,17 @@ export default function Fire() {
                       fillOpacity={0.1}
                       name="portfolio"
                     />
+                    {projParams.inflationRate > 0 && (
+                      <Area
+                        type="monotone"
+                        dataKey="portfolioReal"
+                        stroke="#fd7e14"
+                        fill="#fd7e14"
+                        fillOpacity={0.05}
+                        strokeDasharray="5 5"
+                        name="portfolioReal"
+                      />
+                    )}
                     <Area
                       type="monotone"
                       dataKey="investmentIncome"
@@ -1468,6 +1731,54 @@ export default function Fire() {
                     <Area type="monotone" dataKey="withdrawalCapacity3" stroke="#dc3545" fill="#dc3545" fillOpacity={0.1} name="withdrawalCapacity3" />
                   </AreaChart>
                 </ResponsiveContainer>
+              </div>
+
+              {/* Monte Carlo Simulation (C7) */}
+              <div style={{ marginBottom: '2rem' }}>
+                <h3 style={styles.subsectionTitle}>Monte Carlo Simulation</h3>
+                <p style={styles.helpText}>
+                  {monteCarloResults.simulations} simulations using historical market volatility (16% std dev).
+                  Success = portfolio reaches FIRE number within 30 years.
+                </p>
+                <ResponsiveContainer width="100%" height={350}>
+                  <AreaChart data={monteCarloResults.percentileData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="age" label={{ value: 'Age', position: 'insideBottom', offset: -5 }} />
+                    <YAxis tickFormatter={v => v >= 1000000 ? `$${(v / 1000000).toFixed(1)}M` : `$${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip
+                      formatter={(value, name) => {
+                        const labels = { p10: '10th %ile', p25: '25th %ile', p50: 'Median', p75: '75th %ile', p90: '90th %ile' };
+                        return [formatCurrency(value), labels[name] || name];
+                      }}
+                      labelFormatter={l => `Age ${l}`}
+                    />
+                    <Legend />
+                    <ReferenceLine
+                      y={fireMetrics.fireNumber}
+                      stroke="#dc3545"
+                      strokeDasharray="5 5"
+                      label={{ value: 'FIRE Number', position: 'right', fill: '#dc3545' }}
+                    />
+                    <Area type="monotone" dataKey="p90" stroke="#28a745" fill="#28a745" fillOpacity={0.08} name="p90" />
+                    <Area type="monotone" dataKey="p75" stroke="#28a745" fill="#28a745" fillOpacity={0.12} name="p75" />
+                    <Area type="monotone" dataKey="p50" stroke="#007bff" fill="#007bff" fillOpacity={0.15} name="p50" strokeWidth={2} />
+                    <Area type="monotone" dataKey="p25" stroke="#ffc107" fill="#ffc107" fillOpacity={0.1} name="p25" />
+                    <Area type="monotone" dataKey="p10" stroke="#dc3545" fill="#dc3545" fillOpacity={0.08} name="p10" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Tax-Aware Note (C8) */}
+              <div style={{ marginBottom: '2rem', backgroundColor: '#fff3cd', border: '1px solid #ffc107', borderRadius: '8px', padding: '1rem 1.25rem' }}>
+                <strong style={{ color: '#856404' }}>Tax Considerations</strong>
+                <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.9rem', color: '#856404', lineHeight: '1.5' }}>
+                  Different account types have different tax treatment on withdrawal:
+                  <strong> 401(k)/IRA</strong> withdrawals are taxed as ordinary income.
+                  <strong> Roth IRA/Roth 401(k)</strong> withdrawals are tax-free (after age 59.5).
+                  <strong> Brokerage</strong> gains are taxed at capital gains rates.
+                  <strong> HSA</strong> withdrawals for medical expenses are tax-free.
+                  Your actual withdrawal capacity may be 15-30% lower than shown after accounting for taxes on pre-tax accounts.
+                </p>
               </div>
 
               {/* Scenario Comparison */}

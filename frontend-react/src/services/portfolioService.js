@@ -118,4 +118,22 @@ export const portfolioService = {
     const response = await api.get('/portfolio/performance', { params: { timeframe } });
     return response.data;
   },
+
+  // Benchmark
+  getBenchmark: async (ticker = 'SPY', timeframe = 'all') => {
+    const response = await api.get('/portfolio/benchmark', { params: { ticker, timeframe } });
+    return response.data;
+  },
+
+  // Value History
+  getValueHistory: async () => {
+    const response = await api.get('/portfolio/value-history');
+    return response.data;
+  },
+
+  // Export
+  exportTransactions: async () => {
+    const response = await api.get('/portfolio/export/transactions');
+    return response.data;
+  },
 };

@@ -5,7 +5,8 @@ from sqlalchemy.exc import IntegrityError
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime
 from backend.database import get_db
-from backend.models import PortfolioTransaction as PortfolioTransactionModel
+from backend.models import PortfolioTransaction as PortfolioTransactionModel, User
+from backend.routers.auth import get_current_user
 from backend.schemas import (
     PortfolioTransaction, 
     PortfolioTransactionCreate, 
@@ -20,6 +21,10 @@ from backend.schemas import (
     PerformanceSummary,
 )
 import requests
+import time as _time
+
+_price_cache: dict[str, tuple[float, float]] = {}
+_PRICE_CACHE_TTL = 900  # 15 minutes
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
@@ -57,18 +62,25 @@ def check_duplicate_transaction(
 
 
 def get_current_stock_price(ticker: str) -> Optional[float]:
-    """
-    Get current stock price using yfinance (Yahoo Finance).
-    Free, no API key required.
-    """
+    """Get current stock price using yfinance with 15-minute cache."""
+    now = _time.time()
+    cached = _price_cache.get(ticker)
+    if cached and (now - cached[1]) < _PRICE_CACHE_TTL:
+        return cached[0]
+
+    price = _fetch_stock_price(ticker)
+    if price is not None:
+        _price_cache[ticker] = (price, now)
+    return price
+
+
+def _fetch_stock_price(ticker: str) -> Optional[float]:
+    """Fetch stock price from yfinance."""
     try:
         import yfinance as yf
         
-        # Get ticker data
         stock = yf.Ticker(ticker)
         
-        # Try to get current price from various sources
-        # Method 1: Try fast_info (fastest)
         try:
             price = stock.fast_info.get('lastPrice')
             if price and price > 0:
@@ -76,19 +88,15 @@ def get_current_stock_price(ticker: str) -> Optional[float]:
         except:
             pass
         
-        # Method 2: Try info dictionary
         try:
             info = stock.info
-            # Try current price
             if 'currentPrice' in info and info['currentPrice']:
                 return float(info['currentPrice'])
-            # Try regular market price
             if 'regularMarketPrice' in info and info['regularMarketPrice']:
                 return float(info['regularMarketPrice'])
         except:
             pass
         
-        # Method 3: Get latest from history
         try:
             hist = stock.history(period='1d')
             if not hist.empty and 'Close' in hist.columns:
@@ -448,7 +456,8 @@ def get_transactions(
     limit: int = 1000,
     ticker: Optional[str] = None,
     asset_type: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get all portfolio transactions with optional filtering"""
     query = db.query(PortfolioTransactionModel)
@@ -469,7 +478,8 @@ def get_transactions(
 @router.get("/transactions/{transaction_id}", response_model=PortfolioTransaction)
 def get_transaction(
     transaction_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get a specific transaction by ID"""
     transaction = db.query(PortfolioTransactionModel).filter(
@@ -485,7 +495,8 @@ def get_transaction(
 @router.post("/transactions", response_model=PortfolioTransaction, status_code=status.HTTP_201_CREATED)
 def create_transaction(
     transaction: PortfolioTransactionCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Create a new portfolio transaction"""
     # Normalize ticker and transaction type to uppercase
@@ -496,10 +507,10 @@ def create_transaction(
     transaction_data['fees'] = transaction_data.get('fees', 0.0) or 0.0  # Normalize fees
     
     # Validate transaction type
-    if transaction_data['transaction_type'] not in ["BUY", "SELL"]:
+    if transaction_data['transaction_type'] not in ["BUY", "SELL", "DIVIDEND"]:
         raise HTTPException(
             status_code=400, 
-            detail="Transaction type must be 'BUY' or 'SELL'"
+            detail="Transaction type must be 'BUY', 'SELL', or 'DIVIDEND'"
         )
     
     # Validate asset type
@@ -538,7 +549,8 @@ def create_transaction(
 @router.post("/transactions/batch", response_model=List[PortfolioTransaction], status_code=status.HTTP_201_CREATED)
 def create_transactions_batch(
     batch: PortfolioTransactionBatchCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Batch upload multiple transactions from JSON (standard format)"""
     created_transactions = []
@@ -552,10 +564,10 @@ def create_transactions_batch(
         transaction_data['fees'] = transaction_data.get('fees', 0.0) or 0.0  # Normalize fees
         
         # Validate transaction type
-        if transaction_data['transaction_type'] not in ["BUY", "SELL"]:
+        if transaction_data['transaction_type'] not in ["BUY", "SELL", "DIVIDEND"]:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid transaction type for {transaction_data['ticker']}: must be 'BUY' or 'SELL'"
+                detail=f"Invalid transaction type for {transaction_data['ticker']}: must be 'BUY', 'SELL', or 'DIVIDEND'"
             )
         
         # Validate asset type
@@ -614,7 +626,8 @@ def create_transactions_batch(
 @router.post("/transactions/upload", response_model=PortfolioUploadResponse, status_code=status.HTTP_201_CREATED)
 def upload_transactions_flexible(
     data: Dict[str, Any],
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Flexible batch upload that auto-detects format.
@@ -653,10 +666,10 @@ def upload_transactions_flexible(
                 ).date()
             
             # Validate transaction type
-            if transaction_data['transaction_type'] not in ["BUY", "SELL"]:
+            if transaction_data['transaction_type'] not in ["BUY", "SELL", "DIVIDEND"]:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid transaction type for {transaction_data['ticker']}: must be 'BUY' or 'SELL'"
+                    detail=f"Invalid transaction type for {transaction_data['ticker']}: must be 'BUY', 'SELL', or 'DIVIDEND'"
                 )
             
             # Validate asset type
@@ -738,7 +751,8 @@ def upload_transactions_flexible(
 def update_transaction(
     transaction_id: int,
     transaction_update: PortfolioTransactionUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update a portfolio transaction"""
     db_transaction = db.query(PortfolioTransactionModel).filter(
@@ -755,10 +769,10 @@ def update_transaction(
         update_data['ticker'] = update_data['ticker'].upper()
     if 'transaction_type' in update_data:
         update_data['transaction_type'] = update_data['transaction_type'].upper()
-        if update_data['transaction_type'] not in ["BUY", "SELL"]:
+        if update_data['transaction_type'] not in ["BUY", "SELL", "DIVIDEND"]:
             raise HTTPException(
                 status_code=400,
-                detail="Transaction type must be 'BUY' or 'SELL'"
+                detail="Transaction type must be 'BUY', 'SELL', or 'DIVIDEND'"
             )
     if 'asset_type' in update_data:
         update_data['asset_type'] = update_data['asset_type'].upper()
@@ -780,7 +794,8 @@ def update_transaction(
 @router.delete("/transactions/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_transaction(
     transaction_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Delete a portfolio transaction"""
     db_transaction = db.query(PortfolioTransactionModel).filter(
@@ -798,7 +813,8 @@ def delete_transaction(
 
 @router.delete("/transactions", status_code=status.HTTP_200_OK)
 def delete_all_transactions(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Delete all portfolio transactions"""
     deleted_count = db.query(PortfolioTransactionModel).delete()
@@ -809,7 +825,8 @@ def delete_all_transactions(
 
 @router.get("/holdings", response_model=List[TickerHolding])
 def get_holdings(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get current holdings for all tickers"""
     # Get all unique tickers
@@ -856,7 +873,8 @@ def get_holdings(
 @router.get("/holdings/{ticker}", response_model=TickerHolding)
 def get_ticker_holding(
     ticker: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get current holding information for a specific ticker"""
     ticker = ticker.upper()
@@ -895,7 +913,8 @@ def get_ticker_holding(
 
 @router.get("/summary", response_model=PortfolioSummary)
 def get_portfolio_summary(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get overall portfolio summary"""
     holdings = get_holdings(db)
@@ -919,7 +938,8 @@ def get_portfolio_summary(
 
 @router.get("/yearly-investments", response_model=List[YearlyInvestment])
 def get_yearly_investments(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get total cost basis invested per year and gain/loss on remaining holdings (FIFO + splits)."""
     buy_transactions = (
@@ -1042,7 +1062,8 @@ def get_yearly_investments(
 
 @router.get("/tickers", response_model=List[str])
 def get_all_tickers(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get list of all unique tickers in the portfolio"""
     tickers = db.query(PortfolioTransactionModel.ticker).distinct().order_by(
@@ -1055,7 +1076,8 @@ def get_all_tickers(
 @router.get("/splits/{ticker}")
 def get_ticker_splits(
     ticker: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Get stock split history for a ticker.
@@ -1125,6 +1147,7 @@ TIMEFRAME_DAYS = {
 def get_performance(
     timeframe: str = "all",
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Get portfolio performance data ranked by returns.
@@ -1224,4 +1247,114 @@ def get_performance(
         portfolio_total_invested=portfolio_invested,
         portfolio_current_value=portfolio_current if has_all_prices else None,
     )
+
+
+@router.get("/benchmark")
+def get_benchmark_performance(
+    ticker: str = "SPY",
+    timeframe: str = "all",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get benchmark performance for comparison."""
+    today = date.today()
+    
+    if timeframe == "ytd":
+        period_start = date(today.year, 1, 1)
+    elif timeframe in TIMEFRAME_DAYS:
+        period_start = today - timedelta(days=TIMEFRAME_DAYS[timeframe])
+    else:
+        period_start = today - timedelta(days=365 * 5)
+
+    start_price = _get_period_start_price(ticker.upper(), period_start)
+    current_price = get_current_stock_price(ticker.upper())
+
+    if start_price and current_price and start_price > 0:
+        return_pct = (current_price - start_price) / start_price * 100
+    else:
+        return_pct = None
+
+    return {
+        "ticker": ticker.upper(),
+        "timeframe": timeframe,
+        "start_price": start_price,
+        "current_price": current_price,
+        "return_pct": return_pct,
+    }
+
+
+@router.get("/value-history")
+def get_portfolio_value_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get historical portfolio value based on transaction dates and current prices."""
+    transactions = (
+        db.query(PortfolioTransactionModel)
+        .order_by(PortfolioTransactionModel.transaction_date)
+        .all()
+    )
+    if not transactions:
+        return {"history": []}
+
+    tickers_set = set(t.ticker for t in transactions)
+    current_prices = {}
+    for tk in tickers_set:
+        p = get_current_stock_price(tk)
+        if p:
+            current_prices[tk] = p
+
+    date_map = {}
+    holdings_state = {}
+
+    for txn in transactions:
+        d = str(txn.transaction_date)
+        ticker = txn.ticker
+        if ticker not in holdings_state:
+            holdings_state[ticker] = {"qty": 0.0, "cost": 0.0}
+
+        if txn.transaction_type.upper() == "BUY":
+            holdings_state[ticker]["qty"] += txn.quantity
+            holdings_state[ticker]["cost"] += txn.total_amount
+        elif txn.transaction_type.upper() == "SELL":
+            avg = holdings_state[ticker]["cost"] / holdings_state[ticker]["qty"] if holdings_state[ticker]["qty"] > 0 else 0
+            holdings_state[ticker]["qty"] -= txn.quantity
+            holdings_state[ticker]["cost"] -= txn.quantity * avg
+
+        total_invested = sum(h["cost"] for h in holdings_state.values() if h["qty"] > 0)
+        total_value = sum(
+            h["qty"] * current_prices.get(tk, 0)
+            for tk, h in holdings_state.items()
+            if h["qty"] > 0
+        )
+        date_map[d] = {"date": d, "total_invested": round(total_invested, 2), "current_value": round(total_value, 2)}
+
+    return {"history": sorted(date_map.values(), key=lambda x: x["date"])}
+
+
+@router.get("/export/transactions")
+def export_transactions_csv(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Export all transactions as CSV data."""
+    transactions = (
+        db.query(PortfolioTransactionModel)
+        .order_by(PortfolioTransactionModel.transaction_date.desc())
+        .all()
+    )
+    rows = []
+    for t in transactions:
+        rows.append({
+            "date": str(t.transaction_date),
+            "ticker": t.ticker,
+            "type": t.transaction_type,
+            "asset_type": t.asset_type,
+            "quantity": t.quantity,
+            "price_per_unit": t.price_per_unit,
+            "total_amount": t.total_amount,
+            "fees": t.fees or 0,
+            "notes": t.notes or "",
+        })
+    return {"rows": rows}
 
