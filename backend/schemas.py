@@ -852,3 +852,48 @@ class WorkoutAnalytics(BaseModel):
     workout_frequency_by_month: List[dict]  # {month, count}
     muscle_group_distribution: dict  # {muscle_group: count}
 
+
+# Home internet usage (monthly)
+
+class HomeInternetUsageMonthBase(BaseModel):
+    year: int = Field(..., ge=2000, le=2100)
+    month: int = Field(..., ge=1, le=12)
+    total_gb: float = Field(..., gt=0)
+    download_gb: Optional[float] = Field(None, ge=0)
+    upload_gb: Optional[float] = Field(None, ge=0)
+    source: str = "manual"
+    notes: Optional[str] = None
+
+
+class HomeInternetUsageMonthUpsert(HomeInternetUsageMonthBase):
+    """Create or replace the record for this calendar month."""
+
+    pass
+
+
+class HomeInternetUsageMonthUpdate(BaseModel):
+    total_gb: Optional[float] = Field(None, gt=0)
+    download_gb: Optional[float] = Field(None, ge=0)
+    upload_gb: Optional[float] = Field(None, ge=0)
+    source: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class HomeInternetUsageMonth(HomeInternetUsageMonthBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class EeroScreenshotParseResult(BaseModel):
+    ocr_text_preview: str
+    suggested_year: Optional[int] = None
+    suggested_month: Optional[int] = None
+    suggested_total_gb: Optional[float] = None
+    total_parse_hint: Optional[str] = None
+    parse_note: Optional[str] = None
+    ocr_available: bool = True
+

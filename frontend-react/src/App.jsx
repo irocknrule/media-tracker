@@ -11,6 +11,7 @@ import Habits from './pages/Habits';
 import Workouts from './pages/Workouts';
 import Portfolio from './pages/Portfolio';
 import Fire from './pages/Fire';
+import InternetUsage from './pages/InternetUsage';
 
 function PrivateRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -118,6 +119,14 @@ function AppRoutes() {
         element={
           <PrivateRoute>
             <Fire />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/internet-usage"
+        element={
+          <PrivateRoute>
+            <InternetUsage />
           </PrivateRoute>
         }
       />

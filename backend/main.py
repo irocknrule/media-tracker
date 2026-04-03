@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
 
-from backend.routers import auth, movies, tv_shows, books, music, analytics, search, habits, portfolio, allocation, workouts, fire
+from backend.routers import auth, movies, tv_shows, books, music, analytics, search, habits, portfolio, allocation, workouts, fire, internet_usage
 from backend.database import get_db, engine
 from backend.models import Base
 from backend.schemas import BookYearStat
@@ -47,6 +47,7 @@ app.include_router(portfolio.router)
 app.include_router(allocation.router)
 app.include_router(workouts.router)
 app.include_router(fire.router)
+app.include_router(internet_usage.router)
 
 
 @app.get("/books-stats/summary", response_model=List[BookYearStat])

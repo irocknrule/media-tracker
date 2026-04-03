@@ -1,9 +1,11 @@
 import axios from 'axios';
 
 // In dev, use /api so Vite proxy forwards to backend (avoids wrong host/port or CORS)
-const effectiveBase = import.meta.env.DEV && !import.meta.env.VITE_API_BASE_URL
-  ? '/api'
-  : (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000');
+export const apiBaseUrl =
+  import.meta.env.DEV && !import.meta.env.VITE_API_BASE_URL
+    ? '/api'
+    : import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const effectiveBase = apiBaseUrl;
 console.log('API Base URL:', effectiveBase);
 
 // Create axios instance

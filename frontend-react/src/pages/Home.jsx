@@ -219,6 +219,22 @@ export default function Home() {
                 Track investment accounts, monitor growth, and project your path to financial independence
               </p>
             </div>
+
+            <div
+              style={{
+                ...styles.navCard,
+                ...(hoveredCard === 'internet' ? styles.navCardHover : {}),
+              }}
+              onClick={() => navigate('/internet-usage')}
+              onMouseEnter={() => setHoveredCard('internet')}
+              onMouseLeave={() => setHoveredCard(null)}
+            >
+              <div style={styles.navIcon}>📶</div>
+              <h3 style={styles.navTitle}>Home Internet usage</h3>
+              <p style={styles.navDescription}>
+                Log monthly data totals by hand or from an eero Data usage screenshot
+              </p>
+            </div>
           </div>
         </div>
 

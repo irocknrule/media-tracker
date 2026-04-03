@@ -284,6 +284,26 @@ class ExerciseRecord(Base):
     set_records = relationship("SetRecord", back_populates="exercise_record", cascade="all, delete-orphan", order_by="SetRecord.set_number")
 
 
+class HomeInternetUsageMonth(Base):
+    """One row per calendar month of home internet usage (e.g. from eero or manual entry)."""
+
+    __tablename__ = "home_internet_usage_months"
+    __table_args__ = (
+        UniqueConstraint("year", "month", name="uq_home_internet_usage_year_month"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    year = Column(Integer, nullable=False, index=True)
+    month = Column(Integer, nullable=False)  # 1–12
+    total_gb = Column(Float, nullable=False)
+    download_gb = Column(Float, nullable=True)
+    upload_gb = Column(Float, nullable=True)
+    source = Column(String, default="manual")  # "manual" | "eero_snapshot"
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class SetRecord(Base):
     """Individual set record with reps and weight"""
     __tablename__ = "set_records"
